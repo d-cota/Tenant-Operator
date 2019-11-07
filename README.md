@@ -1,2 +1,2 @@
 # Student-as-a-Service
-Student-as-a-Service using Kubernetes
+This repo hosts the Student-as-a-Service project for the Cloud Computing course (at the Politecnico di Torino) exploiting the Kubernetes functionalities.
