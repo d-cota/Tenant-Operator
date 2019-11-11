@@ -1,0 +1,11 @@
+kind: RoleBinding
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: student-operator
+subjects:
+- kind: ServiceAccount
+  name: student-operator
+roleRef:
+  kind: Role
+  name: student-operator
+  apiGroup: rbac.authorization.k8s.io
