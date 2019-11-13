@@ -9,13 +9,13 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
+	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	"sigs.k8s.io/controller-runtime/pkg/source"
-	"sigs.k8s.io/controller-runtime/pkg/predicate"
-	"sigs.k8s.io/controller-runtime/pkg/event"
 )
 
 var log = logf.Log.WithName("controller_studentapi")
@@ -44,7 +44,7 @@ func add(mgr manager.Manager, r reconcile.Reconciler) error {
 		return err
 	}
 
-	src := &source.Kind{Type:&netgroupv1.StudentAPI{}}
+	src := &source.Kind{Type: &netgroupv1.StudentAPI{}}
 
 	h := &handler.EnqueueRequestForObject{}
 
@@ -92,8 +92,7 @@ type ReconcileStudentAPI struct {
 // The Controller will requeue the Request to be processed again if the returned error is non-nil or
 // Result.Requeue is true, otherwise upon completion it will remove the work from the queue.
 func (r *ReconcileStudentAPI) Reconcile(request reconcile.Request) (reconcile.Result, error) {
-	reqLogger := log.WithValues("Request.Namespace", request.Namespace, "Request.Name", request.Name)
-	reqLogger.Info("Reconciling StudentAPI")
+	//reqLogger := log.WithValues("Request.Namespace", request.Namespace, "Request.Name", request.Name)
 
 	// Fetch the StudentAPI instance
 	instance := &netgroupv1.StudentAPI{}
@@ -108,7 +107,9 @@ func (r *ReconcileStudentAPI) Reconcile(request reconcile.Request) (reconcile.Re
 		// Error reading the object - requeue the request.
 		return reconcile.Result{}, err
 	}
+	studentID := instance.Spec.ID
+	reqLogger := log.WithValues("Student ID", studentID)
+	reqLogger.Info("Created new student")
 
 	return reconcile.Result{}, nil
 }
-	
