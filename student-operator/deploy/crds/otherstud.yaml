@@ -1,0 +1,9 @@
+apiVersion: netgroup.com/v1
+kind: StudentAPI
+metadata:
+  name: otherstudent
+spec:
+  # Add fields here
+  id: s111111
+  name: other
+  surname: student

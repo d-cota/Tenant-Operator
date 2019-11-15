@@ -39,6 +39,10 @@ spec:
               description: student name
               minLength: 1
               type: string
+            publicKey:
+              description: student PublickKey
+              minLength: 1
+              type: string
             surname:
               description: student surname
               minLength: 1
@@ -46,6 +50,7 @@ spec:
           required:
           - id
           - name
+          - publicKey
           - surname
           type: object
         status:

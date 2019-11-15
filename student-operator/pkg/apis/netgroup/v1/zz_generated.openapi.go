@@ -89,8 +89,15 @@ func schema_pkg_apis_netgroup_v1_StudentAPISpec(ref common.ReferenceCallback) co
 							Format:      "",
 						},
 					},
+					"publicKey": {
+						SchemaProps: spec.SchemaProps{
+							Description: "student PublickKey",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
 				},
-				Required: []string{"id", "name", "surname"},
+				Required: []string{"id", "name", "surname", "publicKey"},
 			},
 		},
 	}
