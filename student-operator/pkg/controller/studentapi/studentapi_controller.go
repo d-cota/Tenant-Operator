@@ -1,7 +1,9 @@
 package studentapi
 
 import (
+	"bytes"
 	"context"
+	"fmt"
 	"os"
 
 	scp "github.com/bramvdbogaerde/go-scp"
@@ -88,14 +90,14 @@ type ReconcileStudentAPI struct {
 	scheme *runtime.Scheme
 }
 
-//TODO change function call with parameters for address
-func CopySSHKey(studentID string) (err error) {
+// this function connect as root to remote machine and create a new user named with his studentID
+func AddUser(studentID string) (err error) {
 	// Use SSH key authentication from the auth package
 	// we ignore the host key
-	clientConfig, _ := auth.PasswordKey(studentID, "root", ssh.InsecureIgnoreHostKey())
+	clientConfig, _ := auth.PasswordKey("root", "root", ssh.InsecureIgnoreHostKey())
 
 	// Create a new SCP client
-	//TODO set dinamically address
+	// TODO set dinamically address
 	client := scp.NewClient("192.168.122.16:22", &clientConfig)
 
 	// Connect to the remote server
@@ -105,8 +107,52 @@ func CopySSHKey(studentID string) (err error) {
 	}
 
 	// Open a file
-	//TODO change file path and set home dinamically
-	f, _ := os.Open("/home/davide/try")
+	// TODO change file path and set home dinamically
+	// f, _ := os.Open("/home/davide/try")
+
+	// Close client connection after the file has been copied
+	defer client.Close()
+
+	// Close the file after it has been copied
+	//defer f.Close()
+
+	// Finaly, copy the file over
+	// Usage: CopyFile(fileReader, remotePath, permission)
+
+	// TODO change file path
+	//err = client.CopyFile(f, "./.ssh/authorized_keys", "0644")
+
+	var b bytes.Buffer
+	client.Session.Stdout = &b
+	cmd := "./adduser.sh " + studentID
+	if err = client.Session.Run(cmd); err != nil {
+		return
+	}
+	fmt.Println(b.String())
+
+	return nil
+
+}
+
+// this func connect through SSH to the user just created and copies the provided Public SSH Key
+func CopySSHKey(studentID string) (err error) {
+	// Use SSH key authentication from the auth package
+	// we ignore the host key
+	clientConfig, _ := auth.PasswordKey(studentID, "root", ssh.InsecureIgnoreHostKey())
+
+	// Create a new SCP client
+	// TODO set dinamically address
+	client := scp.NewClient("192.168.122.16:22", &clientConfig)
+
+	// Connect to the remote server
+	err = client.Connect()
+	if err != nil {
+		return
+	}
+
+	// Open a file
+	// TODO change file path and set home dinamically
+	f, _ := os.Open("/home/davide/.ssh/id_rsa.pub")
 
 	// Close client connection after the file has been copied
 	defer client.Close()
@@ -116,16 +162,13 @@ func CopySSHKey(studentID string) (err error) {
 
 	// Finaly, copy the file over
 	// Usage: CopyFile(fileReader, remotePath, permission)
-
-	//TODO change file path
-	err = client.CopyFile(f, "./.ssh/authorized_keys", "0644")
-
+	// TODO change file path
+	err = client.CopyFile(f, "./.ssh/authorized_keys", "0700")
 	if err != nil {
 		return
 	}
 
 	return nil
-
 }
 
 // Reconcile reads that state of the cluster for a StudentAPI object and makes changes based on the state read
@@ -154,14 +197,16 @@ func (r *ReconcileStudentAPI) Reconcile(request reconcile.Request) (reconcile.Re
 	reqLogger := log.WithValues("Student ID", studentID)
 	reqLogger.Info("Created new student")
 
-	// TODO run ./adduser.sh on remote server as sudoers
-	// TODO think to modify bash script to copy publickKey
-	// to the newly created user
-
-	err = CopySSHKey(studentID)
+	err = AddUser(studentID)
 	if err != nil {
 		errLogger := log.WithValues("Error", err)
 		errLogger.Error(err, "Error")
+	} else {
+		err = CopySSHKey(studentID)
+		if err != nil {
+			errLogger := log.WithValues("Error", err)
+			errLogger.Error(err, "Error")
+		}
 	}
 
 	return reconcile.Result{}, nil
