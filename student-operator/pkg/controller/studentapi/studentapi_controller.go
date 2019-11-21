@@ -205,26 +205,58 @@ func (r *CreateReconcileStudentAPI) Reconcile(request reconcile.Request) (reconc
 		// Error reading the object - requeue the request.
 		return reconcile.Result{}, err
 	}
-	studentID := instance.Spec.ID
+	//studentID := instance.Spec.ID
 	/*studentName := instance.Spec.Name
 	studentSurname := instance.Spec.Surname*/
 
-	err = AddUser(studentID)
+	err = AddUser(request.Name)
 	if err != nil {
 		errLogger := log.WithValues("Error", err)
 		errLogger.Error(err, "Error")
 	} else {
-		err = CopySSHKey(studentID)
+		err = CopySSHKey(request.Name)
 		if err != nil {
 			errLogger := log.WithValues("Error", err)
 			errLogger.Error(err, "Error")
 		}
 	}
 
-	reqLogger := log.WithValues("Student ID", studentID)
+	reqLogger := log.WithValues("Student resource name", request.Name)
 	reqLogger.Info("Created new student")
 
 	return reconcile.Result{}, nil
+}
+
+// TODO merge with AddUser
+func DeleteUser(studentID string) (err error) {
+
+	// Use SSH key authentication from the auth package
+	// we ignore the host key
+	clientConfig, _ := auth.PasswordKey("root", "root", ssh.InsecureIgnoreHostKey())
+
+	// Create a new SCP client
+	// TODO set dinamically address
+	client := scp.NewClient("192.168.122.16:22", &clientConfig)
+
+	// Connect to the remote server
+	err = client.Connect()
+	if err != nil {
+		return
+	}
+
+	// Close client connection after the file has been copied
+	defer client.Close()
+
+	var b bytes.Buffer
+	client.Session.Stdout = &b
+	cmd := "deluser --remove-home " + studentID
+	if err = client.Session.Run(cmd); err != nil {
+		return
+	}
+	fmt.Println(b.String())
+
+	return nil
+
 }
 
 func (r *DeleteReconcileStudentAPI) Reconcile(request reconcile.Request) (reconcile.Result, error) {
@@ -237,6 +269,13 @@ func (r *DeleteReconcileStudentAPI) Reconcile(request reconcile.Request) (reconc
 			// Request object not found, could have been deleted after reconcile request.
 			// This is the typical situation for a correctly deleted object
 			// Owned objects are automatically garbage collected. For additional cleanup logic use finalizers.
+
+			err = DeleteUser(request.Name)
+			if err != nil {
+				errLogger := log.WithValues("Error", err)
+				errLogger.Error(err, "Error")
+			}
+
 			// Return and don't requeue
 			return reconcile.Result{}, nil
 		}
