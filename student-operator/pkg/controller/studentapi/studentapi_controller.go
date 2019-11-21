@@ -10,7 +10,6 @@ import (
 	"github.com/bramvdbogaerde/go-scp/auth"
 	netgroupv1 "github.com/example-inc/memcached-operator/pkg/apis/netgroup/v1"
 	"golang.org/x/crypto/ssh"
-	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -31,47 +30,70 @@ var log = logf.Log.WithName("controller_studentapi")
 * business logic.  Delete these comments after modifying this file.*
  */
 
-// Add creates a new StudentAPI Controller and adds it to the Manager. The Manager will set fields on the Controller
+// Add creates two new StudentAPI Controllers and adds them to the Manager. The Manager will set fields on the Controller
 // and Start it when the Manager is Started.
 func Add(mgr manager.Manager) error {
-	return add(mgr, newReconciler(mgr))
+	return add(mgr, newReconcilerCreate(mgr), newReconcilerDelete(mgr))
 }
 
-// newReconciler returns a new reconcile.Reconciler
-func newReconciler(mgr manager.Manager) reconcile.Reconciler {
-	return &ReconcileStudentAPI{client: mgr.GetClient(), scheme: mgr.GetScheme()}
+// newReconcilerCreate returns a new reconcile.Reconciler
+func newReconcilerCreate(mgr manager.Manager) reconcile.Reconciler {
+	return &CreateReconcileStudentAPI{client: mgr.GetClient(), scheme: mgr.GetScheme()}
 }
 
-// add adds a new Controller to mgr with r as the reconcile.Reconciler
-func add(mgr manager.Manager, r reconcile.Reconciler) error {
-	// Create a new controller
-	c, err := controller.New("studentapi-controller", mgr, controller.Options{Reconciler: r})
+// newReconcilerDelete returns a new reconcile.Reconciler
+func newReconcilerDelete(mgr manager.Manager) reconcile.Reconciler {
+	return &DeleteReconcileStudentAPI{client: mgr.GetClient(), scheme: mgr.GetScheme()}
+}
+
+// add adds new Controllers to mgr
+func add(mgr manager.Manager, rCreate reconcile.Reconciler, rDelete reconcile.Reconciler) error {
+	// Create a new controller for Create event
+	c_create, err := controller.New("create-controller", mgr, controller.Options{Reconciler: rCreate})
 	if err != nil {
 		return err
 	}
 
-	src := &source.Kind{Type: &netgroupv1.StudentAPI{}}
+	src_create := &source.Kind{Type: &netgroupv1.StudentAPI{}}
 
-	h := &handler.EnqueueRequestForObject{}
+	h_create := &handler.EnqueueRequestForObject{}
 
-	pred := predicate.Funcs{
+	pred_create := predicate.Funcs{
 		CreateFunc: func(e event.CreateEvent) bool {
 			return true
+		},
+		DeleteFunc: func(e event.DeleteEvent) bool {
+			return false
 		},
 	}
 
 	// Watch for changes to primary resource StudentAPI
-	err = c.Watch(src, h, pred)
+	err = c_create.Watch(src_create, h_create, pred_create)
 	if err != nil {
 		return err
 	}
 
-	// TODO(user): Modify this to be the types you create that are owned by the primary resource
-	// Watch for changes to secondary resource Pods and requeue the owner StudentAPI
-	err = c.Watch(&source.Kind{Type: &corev1.Pod{}}, &handler.EnqueueRequestForOwner{
-		IsController: true,
-		OwnerType:    &netgroupv1.StudentAPI{},
-	})
+	// Create a new controller for Delete event
+	c_delete, err := controller.New("delete-controller", mgr, controller.Options{Reconciler: rDelete})
+	if err != nil {
+		return err
+	}
+
+	src_delete := &source.Kind{Type: &netgroupv1.StudentAPI{}}
+
+	h_delete := &handler.EnqueueRequestForObject{}
+
+	pred_delete := predicate.Funcs{
+		DeleteFunc: func(e event.DeleteEvent) bool {
+			return true
+		},
+		CreateFunc: func(e event.CreateEvent) bool {
+			return false
+		},
+	}
+
+	// Watch for changes to primary resource StudentAPI
+	err = c_delete.Watch(src_delete, h_delete, pred_delete)
 	if err != nil {
 		return err
 	}
@@ -79,13 +101,20 @@ func add(mgr manager.Manager, r reconcile.Reconciler) error {
 	return nil
 }
 
-// blank assignment to verify that ReconcileStudentAPI implements reconcile.Reconciler
-var _ reconcile.Reconciler = &ReconcileStudentAPI{}
+// blank assignment to verify that CreateReconcileStudentAPI implements reconcile.Reconciler
+var _ reconcile.Reconciler = &CreateReconcileStudentAPI{}
 
-// ReconcileStudentAPI reconciles a StudentAPI object
-type ReconcileStudentAPI struct {
+// CreateReconcileStudentAPI reconciles a StudentAPI object
+type CreateReconcileStudentAPI struct {
 	// This client, initialized using mgr.Client() above, is a split client
 	// that reads objects from the cache and writes to the apiserver
+	client client.Client
+	scheme *runtime.Scheme
+}
+
+var _ reconcile.Reconciler = &DeleteReconcileStudentAPI{}
+
+type DeleteReconcileStudentAPI struct {
 	client client.Client
 	scheme *runtime.Scheme
 }
@@ -106,21 +135,8 @@ func AddUser(studentID string) (err error) {
 		return
 	}
 
-	// Open a file
-	// TODO change file path and set home dinamically
-	// f, _ := os.Open("/home/davide/try")
-
 	// Close client connection after the file has been copied
 	defer client.Close()
-
-	// Close the file after it has been copied
-	//defer f.Close()
-
-	// Finaly, copy the file over
-	// Usage: CopyFile(fileReader, remotePath, permission)
-
-	// TODO change file path
-	//err = client.CopyFile(f, "./.ssh/authorized_keys", "0644")
 
 	var b bytes.Buffer
 	client.Session.Stdout = &b
@@ -175,9 +191,7 @@ func CopySSHKey(studentID string) (err error) {
 // and what is in the StudentAPI.Spec
 // The Controller will requeue the Request to be processed again if the returned error is non-nil or
 // Result.Requeue is true, otherwise upon completion it will remove the work from the queue.
-func (r *ReconcileStudentAPI) Reconcile(request reconcile.Request) (reconcile.Result, error) {
-	//reqLogger := log.WithValues("Request.Namespace", request.Namespace, "Request.Name", request.Name)
-
+func (r *CreateReconcileStudentAPI) Reconcile(request reconcile.Request) (reconcile.Result, error) {
 	// Fetch the StudentAPI instance
 	instance := &netgroupv1.StudentAPI{}
 	err := r.client.Get(context.TODO(), request.NamespacedName, instance)
@@ -194,8 +208,6 @@ func (r *ReconcileStudentAPI) Reconcile(request reconcile.Request) (reconcile.Re
 	studentID := instance.Spec.ID
 	/*studentName := instance.Spec.Name
 	studentSurname := instance.Spec.Surname*/
-	reqLogger := log.WithValues("Student ID", studentID)
-	reqLogger.Info("Created new student")
 
 	err = AddUser(studentID)
 	if err != nil {
@@ -208,6 +220,30 @@ func (r *ReconcileStudentAPI) Reconcile(request reconcile.Request) (reconcile.Re
 			errLogger.Error(err, "Error")
 		}
 	}
+
+	reqLogger := log.WithValues("Student ID", studentID)
+	reqLogger.Info("Created new student")
+
+	return reconcile.Result{}, nil
+}
+
+func (r *DeleteReconcileStudentAPI) Reconcile(request reconcile.Request) (reconcile.Result, error) {
+	log.Info("Deleted Student")
+	// Fetch the StudentAPI instance
+	instance := &netgroupv1.StudentAPI{}
+	err := r.client.Get(context.TODO(), request.NamespacedName, instance)
+	if err != nil {
+		if errors.IsNotFound(err) {
+			// Request object not found, could have been deleted after reconcile request.
+			// This is the typical situation for a correctly deleted object
+			// Owned objects are automatically garbage collected. For additional cleanup logic use finalizers.
+			// Return and don't requeue
+			return reconcile.Result{}, nil
+		}
+		// Error reading the object - requeue the request.
+		return reconcile.Result{}, err
+	}
+	// if the object is correctly deleted this piece of code is never reached
 
 	return reconcile.Result{}, nil
 }
