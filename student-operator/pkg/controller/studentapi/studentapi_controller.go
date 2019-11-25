@@ -25,98 +25,26 @@ import (
 
 var log = logf.Log.WithName("controller_studentapi")
 
-/**
-* USER ACTION REQUIRED: This is a scaffold file intended for the user to modify with their own Controller
-* business logic.  Delete these comments after modifying this file.*
- */
+var finalizer string = "StudentFinalizer"
 
-// Add creates two new StudentAPI Controllers and adds them to the Manager. The Manager will set fields on the Controller
-// and Start it when the Manager is Started.
-func Add(mgr manager.Manager) error {
-	return add(mgr, newReconcilerCreate(mgr), newReconcilerDelete(mgr))
-}
-
-// newReconcilerCreate returns a new reconcile.Reconciler
-func newReconcilerCreate(mgr manager.Manager) reconcile.Reconciler {
-	return &CreateReconcileStudentAPI{client: mgr.GetClient(), scheme: mgr.GetScheme()}
-}
-
-// newReconcilerDelete returns a new reconcile.Reconciler
-func newReconcilerDelete(mgr manager.Manager) reconcile.Reconciler {
-	return &DeleteReconcileStudentAPI{client: mgr.GetClient(), scheme: mgr.GetScheme()}
-}
-
-// add adds new Controllers to mgr
-func add(mgr manager.Manager, rCreate reconcile.Reconciler, rDelete reconcile.Reconciler) error {
-	// Create a new controller for Create event
-	c_create, err := controller.New("create-controller", mgr, controller.Options{Reconciler: rCreate})
-	if err != nil {
-		return err
-	}
-
-	src_create := &source.Kind{Type: &netgroupv1.StudentAPI{}}
-
-	h_create := &handler.EnqueueRequestForObject{}
-
-	pred_create := predicate.Funcs{
-		CreateFunc: func(e event.CreateEvent) bool {
+// Helper functions to check and remove string from a slice of strings.
+func containsString(slice []string, s string) bool {
+	for _, item := range slice {
+		if item == s {
 			return true
-		},
-		DeleteFunc: func(e event.DeleteEvent) bool {
-			return false
-		},
+		}
 	}
-
-	// Watch for changes to primary resource StudentAPI
-	err = c_create.Watch(src_create, h_create, pred_create)
-	if err != nil {
-		return err
-	}
-
-	// Create a new controller for Delete event
-	c_delete, err := controller.New("delete-controller", mgr, controller.Options{Reconciler: rDelete})
-	if err != nil {
-		return err
-	}
-
-	src_delete := &source.Kind{Type: &netgroupv1.StudentAPI{}}
-
-	h_delete := &handler.EnqueueRequestForObject{}
-
-	pred_delete := predicate.Funcs{
-		DeleteFunc: func(e event.DeleteEvent) bool {
-			return true
-		},
-		CreateFunc: func(e event.CreateEvent) bool {
-			return false
-		},
-	}
-
-	// Watch for changes to primary resource StudentAPI
-	err = c_delete.Watch(src_delete, h_delete, pred_delete)
-	if err != nil {
-		return err
-	}
-
-	return nil
+	return false
 }
 
-// blank assignment to verify that CreateReconcileStudentAPI implements reconcile.Reconciler
-var _ reconcile.Reconciler = &CreateReconcileStudentAPI{}
-
-// CreateReconcileStudentAPI reconciles a StudentAPI object
-type CreateReconcileStudentAPI struct {
-	// This client, initialized using mgr.Client() above, is a split client
-	// that reads objects from the cache and writes to the apiserver
-	client client.Client
-	scheme *runtime.Scheme
-}
-
-var _ reconcile.Reconciler = &DeleteReconcileStudentAPI{}
-
-type DeleteReconcileStudentAPI struct {
-	client client.Client
-	scheme *runtime.Scheme
+func removeString(slice []string, s string) (result []string) {
+	for _, item := range slice {
+		if item == s {
+			continue
+		}
+		result = append(result, item)
+	}
+	return
 }
 
 // this function connect as root to remote machine and create a new user named with his studentID
@@ -168,6 +96,7 @@ func CopySSHKey(studentID string) (err error) {
 
 	// Open a file
 	// TODO change file path and set home dinamically
+	// TODO read key from the yaml (?)
 	f, _ := os.Open("/home/davide/.ssh/id_rsa.pub")
 
 	// Close client connection after the file has been copied
@@ -185,46 +114,6 @@ func CopySSHKey(studentID string) (err error) {
 	}
 
 	return nil
-}
-
-// Reconcile reads that state of the cluster for a StudentAPI object and makes changes based on the state read
-// and what is in the StudentAPI.Spec
-// The Controller will requeue the Request to be processed again if the returned error is non-nil or
-// Result.Requeue is true, otherwise upon completion it will remove the work from the queue.
-func (r *CreateReconcileStudentAPI) Reconcile(request reconcile.Request) (reconcile.Result, error) {
-	// Fetch the StudentAPI instance
-	instance := &netgroupv1.StudentAPI{}
-	err := r.client.Get(context.TODO(), request.NamespacedName, instance)
-	if err != nil {
-		if errors.IsNotFound(err) {
-			// Request object not found, could have been deleted after reconcile request.
-			// Owned objects are automatically garbage collected. For additional cleanup logic use finalizers.
-			// Return and don't requeue
-			return reconcile.Result{}, nil
-		}
-		// Error reading the object - requeue the request.
-		return reconcile.Result{}, err
-	}
-	//studentID := instance.Spec.ID
-	/*studentName := instance.Spec.Name
-	studentSurname := instance.Spec.Surname*/
-
-	err = AddUser(request.Name)
-	if err != nil {
-		errLogger := log.WithValues("Error", err)
-		errLogger.Error(err, "Error")
-	} else {
-		err = CopySSHKey(request.Name)
-		if err != nil {
-			errLogger := log.WithValues("Error", err)
-			errLogger.Error(err, "Error")
-		}
-	}
-
-	reqLogger := log.WithValues("Student resource name", request.Name)
-	reqLogger.Info("Created new student")
-
-	return reconcile.Result{}, nil
 }
 
 // TODO merge with AddUser
@@ -249,7 +138,7 @@ func DeleteUser(studentID string) (err error) {
 
 	var b bytes.Buffer
 	client.Session.Stdout = &b
-	cmd := "deluser --remove-home " + studentID
+	cmd := "pkill -KILL -u " + studentID + "; deluser --remove-home " + studentID
 	if err = client.Session.Run(cmd); err != nil {
 		return
 	}
@@ -259,30 +148,191 @@ func DeleteUser(studentID string) (err error) {
 
 }
 
-func (r *DeleteReconcileStudentAPI) Reconcile(request reconcile.Request) (reconcile.Result, error) {
-	log.Info("Deleted Student")
+// Add creates two new StudentAPI Controllers and adds them to the Manager. The Manager will set fields on the Controller
+// and Start it when the Manager is Started.
+func Add(mgr manager.Manager) error {
+	return add(mgr, newReconcilerCreate(mgr), newReconcilerDelete(mgr))
+}
+
+// newReconcilerCreate returns a new reconcile.Reconciler
+func newReconcilerCreate(mgr manager.Manager) reconcile.Reconciler {
+	return &CreateReconcileStudentAPI{client: mgr.GetClient(), scheme: mgr.GetScheme()}
+}
+
+// newReconcilerDelete returns a new reconcile.Reconciler
+func newReconcilerDelete(mgr manager.Manager) reconcile.Reconciler {
+	return &DeleteReconcileStudentAPI{client: mgr.GetClient(), scheme: mgr.GetScheme()}
+}
+
+// add adds new Controllers to mgr
+func add(mgr manager.Manager, rCreate reconcile.Reconciler, rDelete reconcile.Reconciler) error {
+	// Create a new controller for Create event
+	c_create, err := controller.New("create-controller", mgr, controller.Options{Reconciler: rCreate})
+	if err != nil {
+		return err
+	}
+
+	src_create := &source.Kind{Type: &netgroupv1.StudentAPI{}}
+
+	h_create := &handler.EnqueueRequestForObject{}
+
+	pred_create := predicate.Funcs{
+		CreateFunc: func(e event.CreateEvent) bool {
+			return true
+			//return false
+		},
+		DeleteFunc: func(e event.DeleteEvent) bool {
+			return false
+		},
+		UpdateFunc: func(e event.UpdateEvent) bool {
+			return false
+		},
+	}
+
+	// Watch for changes to primary resource StudentAPI
+	err = c_create.Watch(src_create, h_create, pred_create)
+	if err != nil {
+		return err
+	}
+
+	// Create a new controller for Delete event
+	c_delete, err := controller.New("delete-controller", mgr, controller.Options{Reconciler: rDelete})
+	if err != nil {
+		return err
+	}
+
+	src_delete := &source.Kind{Type: &netgroupv1.StudentAPI{}}
+
+	h_delete := &handler.EnqueueRequestForObject{}
+
+	pred_delete := predicate.Funcs{
+		DeleteFunc: func(e event.DeleteEvent) bool {
+			return true
+		},
+		CreateFunc: func(e event.CreateEvent) bool {
+			return false
+			//return true
+		},
+		UpdateFunc: func(e event.UpdateEvent) bool {
+			return !e.MetaNew.GetDeletionTimestamp().IsZero()
+			//return false
+			//return true
+		},
+	}
+
+	// Watch for changes to primary resource StudentAPI
+	err = c_delete.Watch(src_delete, h_delete, pred_delete)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// blank assignment to verify that CreateReconcileStudentAPI implements reconcile.Reconciler
+var _ reconcile.Reconciler = &CreateReconcileStudentAPI{}
+
+// CreateReconcileStudentAPI reconciles a StudentAPI object
+type CreateReconcileStudentAPI struct {
+	// This client, initialized using mgr.Client() above, is a split client
+	// that reads objects from the cache and writes to the apiserver
+	client client.Client
+	scheme *runtime.Scheme
+}
+
+var _ reconcile.Reconciler = &DeleteReconcileStudentAPI{}
+
+type DeleteReconcileStudentAPI struct {
+	client client.Client
+	scheme *runtime.Scheme
+}
+
+// Reconcile reads that state of the cluster for a StudentAPI object and makes changes based on the state read
+// and what is in the StudentAPI.Spec
+// The Controller will requeue the Request to be processed again if the returned error is non-nil or
+// Result.Requeue is true, otherwise upon completion it will remove the work from the queue.
+func (r *CreateReconcileStudentAPI) Reconcile(request reconcile.Request) (reconcile.Result, error) {
 	// Fetch the StudentAPI instance
 	instance := &netgroupv1.StudentAPI{}
 	err := r.client.Get(context.TODO(), request.NamespacedName, instance)
 	if err != nil {
 		if errors.IsNotFound(err) {
 			// Request object not found, could have been deleted after reconcile request.
-			// This is the typical situation for a correctly deleted object
 			// Owned objects are automatically garbage collected. For additional cleanup logic use finalizers.
-
-			err = DeleteUser(request.Name)
-			if err != nil {
-				errLogger := log.WithValues("Error", err)
-				errLogger.Error(err, "Error")
-			}
-
 			// Return and don't requeue
 			return reconcile.Result{}, nil
 		}
 		// Error reading the object - requeue the request.
 		return reconcile.Result{}, err
 	}
-	// if the object is correctly deleted this piece of code is never reached
+
+	// The object is being created, so if it does not have our finalizer,
+	// then lets add the finalizer and update the object.
+	// This is equivalent to register the finalizer
+	if !containsString(instance.Finalizers, finalizer) {
+		instance.Finalizers = append(instance.Finalizers, finalizer)
+		if err = r.client.Update(context.TODO(), instance); err != nil {
+			return reconcile.Result{}, err
+		}
+	}
+
+	err = AddUser(request.Name)
+	if err != nil {
+		errLogger := log.WithValues("Error", err)
+		errLogger.Error(err, "Error")
+	} else {
+		err = CopySSHKey(request.Name)
+		if err != nil {
+			errLogger := log.WithValues("Error", err)
+			errLogger.Error(err, "Error")
+		} else {
+			reqLogger := log.WithValues("Student resource name", request.Name)
+			reqLogger.Info("Created new student")
+		}
+	}
 
 	return reconcile.Result{}, nil
 }
+
+func (r *DeleteReconcileStudentAPI) Reconcile(request reconcile.Request) (reconcile.Result, error) {
+	// Fetch the StudentAPI instance
+	instance := &netgroupv1.StudentAPI{}
+	err := r.client.Get(context.TODO(), request.NamespacedName, instance)
+	if err != nil {
+		// We'll ignore not found errors since the object could
+		// be already deleted
+		return reconcile.Result{}, client.IgnoreNotFound(err)
+	}
+
+	// look for matching finalizers
+	if containsString(instance.Finalizers, finalizer) {
+		// if requested finalizer is present, we will handle the
+		// deletion of external resource, i.e. a user account
+		if err = DeleteUser(request.Name); err != nil {
+			// if fail to delete the external dependency here, return with error
+			// so that it can be retried
+			return reconcile.Result{}, err
+		}
+
+		// remove our finalizer from the list and update it.
+		instance.Finalizers = removeString(instance.Finalizers, finalizer)
+		if err = r.client.Update(context.TODO(), instance); err != nil {
+			return reconcile.Result{}, err
+		}
+
+		log.Info("Deleted Student")
+
+	}
+
+	return reconcile.Result{}, nil
+}
+
+// TODO deploy it on cluster
+// TODO modify yaml with list of accessible machines (maybe label)
+// TODO handle all possible errors
+// TODO login on multiple machines (maybe watching the kubernetes label)
+// TODO refactor with class
+// TODO operator to manage the machines (and synchronize the access when a machine is created/deleted)
+// TODO testing
+// TODO change auth method on server (no pass but key)
+// TODO add name and surname when registering
