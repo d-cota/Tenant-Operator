@@ -276,17 +276,17 @@ func (r *CreateReconcileStudentAPI) Reconcile(request reconcile.Request) (reconc
 		}
 	}
 
-	err = AddUser(request.Name)
+	err = AddUser(instance.Spec.ID)
 	if err != nil {
 		errLogger := log.WithValues("Error", err)
 		errLogger.Error(err, "Error")
 	} else {
-		err = CopySSHKey(request.Name)
+		err = CopySSHKey(instance.Spec.ID)
 		if err != nil {
 			errLogger := log.WithValues("Error", err)
 			errLogger.Error(err, "Error")
 		} else {
-			reqLogger := log.WithValues("Student resource name", request.Name)
+			reqLogger := log.WithValues("Student ID", instance.Spec.ID)
 			reqLogger.Info("Created new student")
 		}
 	}
@@ -308,7 +308,7 @@ func (r *DeleteReconcileStudentAPI) Reconcile(request reconcile.Request) (reconc
 	if containsString(instance.Finalizers, finalizer) {
 		// if requested finalizer is present, we will handle the
 		// deletion of external resource, i.e. a user account
-		if err = DeleteUser(request.Name); err != nil {
+		if err = DeleteUser(instance.Spec.ID); err != nil {
 			// if fail to delete the external dependency here, return with error
 			// so that it can be retried
 			return reconcile.Result{}, err
@@ -320,7 +320,8 @@ func (r *DeleteReconcileStudentAPI) Reconcile(request reconcile.Request) (reconc
 			return reconcile.Result{}, err
 		}
 
-		log.Info("Deleted Student")
+		reqLogger := log.WithValues("Student ID", instance.Spec.ID)
+		reqLogger.Info("Deleted student")
 
 	}
 
@@ -336,3 +337,4 @@ func (r *DeleteReconcileStudentAPI) Reconcile(request reconcile.Request) (reconc
 // TODO testing
 // TODO change auth method on server (no pass but key)
 // TODO add name and surname when registering
+// TODO initializer e get stati utenti
