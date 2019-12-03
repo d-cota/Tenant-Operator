@@ -329,12 +329,12 @@ func (r *DeleteReconcileStudentAPI) Reconcile(request reconcile.Request) (reconc
 }
 
 // TODO deploy it on cluster
-// TODO modify yaml with list of accessible machines (maybe label)
-// TODO handle all possible errors
 // TODO login on multiple machines (maybe watching the kubernetes label)
-// TODO refactor with class
+// TODO add label on CR to distinguish accessible machines
 // TODO operator to manage the machines (and synchronize the access when a machine is created/deleted)
+// TODO initializer e get stati utenti
+// TODO handle all possible errors
+// TODO refactor with class
 // TODO testing
 // TODO change auth method on server (no pass but key)
 // TODO add name and surname when registering
-// TODO initializer e get stati utenti
