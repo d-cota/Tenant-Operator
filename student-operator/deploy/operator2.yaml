@@ -13,18 +13,10 @@ spec:
         name: student-operator
     spec:
       serviceAccountName: student-operator
-      volumes:
-      - name: secret-volume
-        secret:
-          secretName: ssh-key-secret
       containers:
         - name: student-operator
           # Replace this with the built image name
-          image: docker.io/dcota1/student-operator:v1.1
-          volumeMounts:
-          - name: secret-volume
-            readOnly: true
-            mountPath: "etc/secret-volume"
+          image: docker.io/dcota1/student-operator:v1
           command:
           - student-operator
           imagePullPolicy: Always
@@ -39,3 +31,8 @@ spec:
                   fieldPath: metadata.name
             - name: OPERATOR_NAME
               value: "student-operator"
+            - name: SERVERS
+              valueFrom:
+                configMapKeyRef:
+                  name: serverconfig
+                  key: machines

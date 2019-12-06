@@ -1,12 +1,8 @@
 apiVersion: v1
-data:
-  config.yaml: |
-    ---
-    machines:
-    - 192.168.122.16
-    - 192.168.111.17
 kind: ConfigMap
 metadata:
-  creationTimestamp: null
   name: serverconfig
-  selfLink: /api/v1/namespaces/default/configmaps/serverconfig
+data:
+    machines:
+      - 192.168.122.16
+      - 192.168.111.17

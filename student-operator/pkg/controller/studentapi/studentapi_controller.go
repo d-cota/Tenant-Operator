@@ -328,7 +328,6 @@ func (r *DeleteReconcileStudentAPI) Reconcile(request reconcile.Request) (reconc
 	return reconcile.Result{}, nil
 }
 
-// TODO deploy it on cluster
 // TODO login on multiple machines (maybe watching the kubernetes label)
 // TODO add label on CR to distinguish accessible machines
 // TODO operator to manage the machines (and synchronize the access when a machine is created/deleted)
@@ -338,3 +337,7 @@ func (r *DeleteReconcileStudentAPI) Reconcile(request reconcile.Request) (reconc
 // TODO testing
 // TODO change auth method on server (no pass but key)
 // TODO add name and surname when registering
+
+// TODO operatore per creare configmap (?), watchare configmap (crd per i server, operator che watcha le server cr e triggera un evento alla create/delete)
+// TODO aggiungere ruolo a studente, label, Bastion conterrà tutte le label, netgroup server contiene solo 'tesisti' e 'prof'
+// TODO montare folder file da configurazione, mettere file dentro configmap

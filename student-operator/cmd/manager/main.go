@@ -69,13 +69,11 @@ func main() {
 
 	printVersion()
 
-	/*namespace, err := k8sutil.GetWatchNamespace()
+	namespace, err := k8sutil.GetWatchNamespace()
 	if err != nil {
 		log.Error(err, "Failed to get watch namespace")
 		os.Exit(1)
-	}*/
-
-	namespace := "default"
+	}
 
 	// Get a config to talk to the apiserver
 	cfg, err := config.GetConfig()
@@ -104,6 +102,10 @@ func main() {
 	}
 
 	log.Info("Registering Components.")
+
+	/*machines := os.Getenv("SERVERS")
+	newLogger := log.WithValues("machines",machines)
+	newLogger.Info(machines, "machines")*/
 
 	// Setup Scheme for all resources
 	if err := apis.AddToScheme(mgr.GetScheme()); err != nil {
