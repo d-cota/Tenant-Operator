@@ -51,7 +51,7 @@ func removeString(slice []string, s string) (result []string) {
 // this function connect as root to remote machine and create a new user named with his studentID
 func AddUser(studentID string) (err error) {
 
-	key, err := ioutil.ReadFile("/home/davide/.ssh/id_rsa")
+	key, err := ioutil.ReadFile("/etc/secret-volume/ssh-privatekey")
 	if err != nil {
 		return
 	}
@@ -103,23 +103,11 @@ func AddUser(studentID string) (err error) {
 
 	var b bytes.Buffer
 	session.Stdout = &b
-	if err = session.Run("/usr/bin/whoami"); err != nil {
+	cmd := "sudo ./addstudent.sh " + studentID
+	if err = session.Run(cmd); err != nil {
 		return
 	}
 	fmt.Println(b.String())
-
-	/*err = &sClient.Connect()
-		if err != nil {
-			return
-		}
-
-	var b bytes.Buffer
-	sClient.Session.Stdout = &b
-	cmd := "./adduser.sh " + studentID
-	if err = sClient.Session.Run(cmd); err != nil {
-		return
-	}
-	fmt.Println(b.String())*/
 
 	return nil
 }
@@ -315,18 +303,21 @@ func (r *CreateReconcileStudentAPI) Reconcile(request reconcile.Request) (reconc
 	// The object is being created, so if it does not have our finalizer,
 	// then lets add the finalizer and update the object.
 	// This is equivalent to register the finalizer
-	if !containsString(instance.Finalizers, finalizer) {
+	/*if !containsString(instance.Finalizers, finalizer) {
 		instance.Finalizers = append(instance.Finalizers, finalizer)
 		if err = r.client.Update(context.TODO(), instance); err != nil {
 			return reconcile.Result{}, err
 		}
-	}
+	}*/
 
 	err = AddUser(instance.Spec.ID)
 	if err != nil {
 		errLogger := log.WithValues("Error", err)
 		errLogger.Error(err, "Error")
 	} else {
+		reqLogger := log.WithValues("Student ID", instance.Spec.ID)
+		reqLogger.Info("Created new student")
+		/*
 		err = CopySSHKey(instance.Spec.ID)
 		if err != nil {
 			errLogger := log.WithValues("Error", err)
@@ -334,7 +325,7 @@ func (r *CreateReconcileStudentAPI) Reconcile(request reconcile.Request) (reconc
 		} else {
 			reqLogger := log.WithValues("Student ID", instance.Spec.ID)
 			reqLogger.Info("Created new student")
-		}
+		}*/
 	}
 
 	return reconcile.Result{}, nil
