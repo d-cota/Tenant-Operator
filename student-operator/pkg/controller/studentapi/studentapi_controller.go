@@ -10,6 +10,7 @@ import (
 	"github.com/bramvdbogaerde/go-scp/auth"
 	netgroupv1 "github.com/example-inc/memcached-operator/pkg/apis/netgroup/v1"
 	"golang.org/x/crypto/ssh"
+	"io/ioutil"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -49,33 +50,78 @@ func removeString(slice []string, s string) (result []string) {
 
 // this function connect as root to remote machine and create a new user named with his studentID
 func AddUser(studentID string) (err error) {
-	// Use SSH key authentication from the auth package
-	// we ignore the host key
-	clientConfig, _ := auth.PasswordKey("root", "root", ssh.InsecureIgnoreHostKey())
 
-	// Create a new SCP client
-	// TODO set dinamically address
-	client := scp.NewClient("192.168.122.16:22", &clientConfig)
-
-	// Connect to the remote server
-	err = client.Connect()
+	key, err := ioutil.ReadFile("/home/davide/.ssh/id_rsa")
 	if err != nil {
 		return
 	}
 
-	// Close client connection after the file has been copied
-	defer client.Close()
+	signer, err := ssh.ParsePrivateKey(key)
+	if err != nil {
+		return
+	}
+
+	config := &ssh.ClientConfig{
+		User: "bastion",
+		Auth: []ssh.AuthMethod{
+			ssh.PublicKeys(signer),
+		},
+		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
+	}
+
+	bClient, err := ssh.Dial("tcp", "130.192.225.74:22", config)
+	if err != nil {
+		return
+	}
+
+	conn, err := bClient.Dial("tcp", "10.244.2.199:22")
+	if err != nil {
+		return
+	}
+
+	config = &ssh.ClientConfig{
+		User: "davide",
+		Auth: []ssh.AuthMethod{
+			ssh.PublicKeys(signer),
+		},
+		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
+	}
+
+	ncc, chans, reqs, err := ssh.NewClientConn(conn, "10.244.2.199:22", config)
+	if err != nil {
+		return
+	}
+
+	sClient := ssh.NewClient(ncc, chans, reqs)
+
+	session, err := sClient.NewSession()
+	if err != nil {
+		return
+	}
+
+	defer session.Close()
 
 	var b bytes.Buffer
-	client.Session.Stdout = &b
-	cmd := "./adduser.sh " + studentID
-	if err = client.Session.Run(cmd); err != nil {
+	session.Stdout = &b
+	if err = session.Run("/usr/bin/whoami"); err != nil {
 		return
 	}
 	fmt.Println(b.String())
 
-	return nil
+	/*err = &sClient.Connect()
+		if err != nil {
+			return
+		}
 
+	var b bytes.Buffer
+	sClient.Session.Stdout = &b
+	cmd := "./adduser.sh " + studentID
+	if err = sClient.Session.Run(cmd); err != nil {
+		return
+	}
+	fmt.Println(b.String())*/
+
+	return nil
 }
 
 // this func connect through SSH to the user just created and copies the provided Public SSH Key
