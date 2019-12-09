@@ -115,55 +115,13 @@ func AddUser(studentID string) (err error) {
 
 	var b bytes.Buffer
 	sClient.Session.Stdout = &b
-	cmd := "ls -ah"//"./adduser.sh " + studentID
+	cmd := "./adduser.sh " + studentID
 	if err = sClient.Session.Run(cmd); err != nil {
 		return
 	}
 	fmt.Println(b.String())*/
 
 	return nil
-	/*
-		// Use SSH key authentication from the auth package
-		// we ignore the host key
-		clientConfig, _ := auth.PasswordKey("root", "root", ssh.InsecureIgnoreHostKey())
-
-		// Create a new SCP client
-		// TODO set dinamically address
-		client := scp.NewClient("192.168.122.16:22", &clientConfig)
-
-		// Connect to the remote server
-		err = client.Connect()
-		if err != nil {
-			return
-		}
-
-		// Close client connection after the file has been copied
-		defer client.Close()
-
-		var b bytes.Buffer
-		client.Session.Stdout = &b
-		cmd := "./adduser.sh " + studentID
-		if err = client.Session.Run(cmd); err != nil {
-			return
-		}
-		fmt.Println(b.String())
-
-		return nil
-	*/
-
-	/*ssh := &easyssh.MakeConfig{
-		User:    "davide",
-		Server:  "10.244.2.199",
-		KeyPath: "/home/davide/.ssh/id_rsa",
-		Proxy: easyssh.DefaultConfig{
-			User:    "bastion",
-			Server:  "130.192.225.74",
-			KeyPath: "/home/davide/.ssh/id_rsa",
-		},
-	}
-
-	return nil*/
-
 }
 
 // this func connect through SSH to the user just created and copies the provided Public SSH Key
