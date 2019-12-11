@@ -4,7 +4,10 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"os"
+	"strings"
+	"sync"
 
 	scp "github.com/bramvdbogaerde/go-scp"
 	"github.com/bramvdbogaerde/go-scp/auth"
@@ -49,7 +52,7 @@ func removeString(slice []string, s string) (result []string) {
 }
 
 // this function connect as root to remote machine and create a new user named with his studentID
-func AddUser(studentID string) (err error) {
+func AddUser(studentID string, publicKey string) (err error) {
 
 	key, err := ioutil.ReadFile("/home/davide/.ssh/id_rsa")
 	if err != nil {
@@ -98,25 +101,41 @@ func AddUser(studentID string) (err error) {
 	if err != nil {
 		return
 	}
-
 	defer session.Close()
 
-	var b bytes.Buffer
-	session.Stdout = &b
-	if err = session.Run("/usr/bin/whoami"); err != nil {
-		return
+	file, err := os.Create("pkey")
+	if err != nil {
+		return err
 	}
-	fmt.Println(b.String())
+	defer file.Close()
 
-	/*err = &sClient.Connect()
-		if err != nil {
-			return
-		}
+	_, err = io.Copy(file, strings.NewReader(publicKey))
+	if err != nil {
+		return err
+	}
 
-	var b bytes.Buffer
-	sClient.Session.Stdout = &b
-	cmd := "./adduser.sh " + studentID
-	if err = sClient.Session.Run(cmd); err != nil {
+	stat, _ := file.Stat()
+
+	wg := sync.WaitGroup{}
+	wg.Add(1)
+
+	go func() {
+		hostIn, _ := session.StdinPipe()
+		defer hostIn.Close()
+		fmt.Fprintf(hostIn, "C0664 %d %s\n", stat.Size(), "filecopyname")
+		io.Copy(hostIn, file)
+		fmt.Fprint(hostIn, "\x00")
+		wg.Done()
+	}()
+
+	session.Run("/usr/bin/scp -t /remotedirectory/")
+	wg.Wait()
+
+	/*var b bytes.Buffer
+	session.Stdout = &b
+	cmd := "sudo ./addStudent.sh " + studentID
+
+	if err = session.Run(cmd); err != nil {
 		return
 	}
 	fmt.Println(b.String())*/
@@ -322,7 +341,7 @@ func (r *CreateReconcileStudentAPI) Reconcile(request reconcile.Request) (reconc
 		}
 	}
 
-	err = AddUser(instance.Spec.ID)
+	err = AddUser(instance.Spec.ID, instance.Spec.PublicKey)
 	if err != nil {
 		errLogger := log.WithValues("Error", err)
 		errLogger.Error(err, "Error")
