@@ -29,8 +29,6 @@ import (
 
 var log = logf.Log.WithName("controller_studentapi")
 
-var finalizer string = "StudentFinalizer"
-
 // Helper functions to check and remove string from a slice of strings.
 func containsString(slice []string, s string) bool {
 	for _, item := range slice {
@@ -64,19 +62,18 @@ const (
 	BASTION      string = "bastion"
 	BASTION_ADDR string = "130.192.225.74:22"
 	HOME         string = "/home/"
+	FINALIZER    string = "StudentFinalizer"
 )
 
-// this function connect as root to remote machine and create a new user named with his studentID
-func AddUser(c Connection) (err error) {
-
+func EstablishConnection(remoteAddr string, remotePort string, remoteUser string) (*Session, error) {
 	key, err := ioutil.ReadFile(PRIVATE_KEY) // path to bastion private key authentication
 	if err != nil {
-		return
+		return err
 	}
 
 	signer, err := ssh.ParsePrivateKey(key)
 	if err != nil {
-		return
+		return err
 	}
 
 	config := &ssh.ClientConfig{
@@ -89,17 +86,17 @@ func AddUser(c Connection) (err error) {
 
 	bClient, err := ssh.Dial("tcp", BASTION_ADDR, config)
 	if err != nil {
-		return
+		return err
 	}
 
-	rAddr := c.remoteAddr + ":" + c.remotePort
+	rAddr := remoteAddr + ":" + remotePort
 	conn, err := bClient.Dial("tcp", rAddr) // start dialing with remote server
 	if err != nil {
-		return
+		return err
 	}
 
 	config = &ssh.ClientConfig{
-		User: c.remoteUser,
+		User: remoteUser,
 		Auth: []ssh.AuthMethod{
 			ssh.PublicKeys(signer),
 		},
@@ -108,18 +105,21 @@ func AddUser(c Connection) (err error) {
 
 	ncc, chans, reqs, err := ssh.NewClientConn(conn, rAddr, config)
 	if err != nil {
-		return
+		return err
 	}
 
 	sClient := ssh.NewClient(ncc, chans, reqs)
 
-	session, err := sClient.NewSession()
-	if err != nil {
-		return
-	}
+	return sClient.NewSession()
+}
+
+// this function connect as root to remote machine and create a new user named with his studentID
+func AddUser(c Connection) (err error) {
+
+	session, err := EstablishConnection(c.remoteAddr, c.remotePort, c.remoteUser)
 	defer session.Close()
 
-	// keyPath := HOME + c.remoteUser + "/tmp/" + c.newUser -> where to write user key in pod
+	// keyPath := "/tmp/" + c.newUser -> where to write user key in pod
 
 	file, err := os.Create(c.newUser) //filename
 	if err != nil {
@@ -165,28 +165,13 @@ func AddUser(c Connection) (err error) {
 	return nil
 }
 
-// TODO merge with AddUser
-func DeleteUser(studentID string) (err error) {
+func DeleteUser(c Connection) (err error) {
 
-	// Use SSH key authentication from the auth package
-	// we ignore the host key
-	clientConfig, _ := auth.PasswordKey("root", "root", ssh.InsecureIgnoreHostKey())
-
-	// Create a new SCP client
-	// TODO set dinamically address
-	client := scp.NewClient("192.168.122.16:22", &clientConfig)
-
-	// Connect to the remote server
-	err = client.Connect()
-	if err != nil {
-		return
-	}
-
-	// Close client connection after the file has been copied
-	defer client.Close()
+	session, err := EstablishConnection(c.remoteAddr, c.remotePort, c.remoteUser)
+	defer session.Close()
 
 	var b bytes.Buffer
-	client.Session.Stdout = &b
+	session.Stdout = &b
 	cmd := "pkill -KILL -u " + studentID + "; deluser --remove-home " + studentID
 	if err = client.Session.Run(cmd); err != nil {
 		return
@@ -318,8 +303,8 @@ func (r *CreateReconcileStudentAPI) Reconcile(request reconcile.Request) (reconc
 	// The object is being created, so if it does not have our finalizer,
 	// then lets add the finalizer and update the object.
 	// This is equivalent to register the finalizer
-	if !containsString(instance.Finalizers, finalizer) {
-		instance.Finalizers = append(instance.Finalizers, finalizer)
+	if !containsString(instance.Finalizers, FINALIZER) {
+		instance.Finalizers = append(instance.Finalizers, FINALIZER)
 		if err = r.client.Update(context.TODO(), instance); err != nil {
 			return reconcile.Result{}, err
 		}
@@ -337,6 +322,8 @@ func (r *CreateReconcileStudentAPI) Reconcile(request reconcile.Request) (reconc
 	if err != nil {
 		errLogger := log.WithValues("Error", err)
 		errLogger.Error(err, "Error")
+		// TODO re-reconcile, don't stop 
+		// TODO initializer
 	} else {
 		reqLogger := log.WithValues("Student ID", instance.Spec.ID)
 		reqLogger.Info("Created new student")
@@ -355,18 +342,26 @@ func (r *DeleteReconcileStudentAPI) Reconcile(request reconcile.Request) (reconc
 		return reconcile.Result{}, client.IgnoreNotFound(err)
 	}
 
+	conn := Connection{
+		remoteAddr: "10.244.2.199",
+		remoteUser: "davide",
+		remotePort: "22",
+		publicKey:  instance.Spec.PublicKey,
+		newUser:    instance.Spec.ID,
+	}
+
 	// look for matching finalizers
-	if containsString(instance.Finalizers, finalizer) {
+	if containsString(instance.Finalizers, FINALIZER) {
 		// if requested finalizer is present, we will handle the
 		// deletion of external resource, i.e. a user account
-		if err = DeleteUser(instance.Spec.ID); err != nil {
+		if err = DeleteUser(conn); err != nil {
 			// if fail to delete the external dependency here, return with error
 			// so that it can be retried
 			return reconcile.Result{}, err
 		}
 
 		// remove our finalizer from the list and update it.
-		instance.Finalizers = removeString(instance.Finalizers, finalizer)
+		instance.Finalizers = removeString(instance.Finalizers, FINALIZER)
 		if err = r.client.Update(context.TODO(), instance); err != nil {
 			return reconcile.Result{}, err
 		}
@@ -379,13 +374,10 @@ func (r *DeleteReconcileStudentAPI) Reconcile(request reconcile.Request) (reconc
 	return reconcile.Result{}, nil
 }
 
-// TODO deploy it on cluster
 // TODO login on multiple machines (maybe watching the kubernetes label)
 // TODO add label on CR to distinguish accessible machines
-// TODO operator to manage the machines (and synchronize the access when a machine is created/deleted)
-// TODO initializer e get stati utenti
+// TODO synchronize the access when a machine is created/deleted
+// TODO quanti utenti connessi
 // TODO handle all possible errors
 // TODO refactor with class
-// TODO testing
-// TODO change auth method on server (no pass but key)
 // TODO add name and surname when registering
