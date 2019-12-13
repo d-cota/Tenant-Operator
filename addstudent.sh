@@ -22,11 +22,12 @@ username=$1
   	echo "please chose another username."
 	exit $E_USEREXISTS
 	fi  
-
+        
+        # check returns
 	useradd -m -d /home/$username -s /bin/bash $username
 	mkdir /home/$username/.ssh/
 	touch /home/$username/.ssh/authorized_keys
-	cp /home/davide/tmp/id_rsa.pub /home/$username/.ssh/authorized_keys #change davide,tmp,key
+	cp /home/$USER/$username.pub /home/$username/.ssh/authorized_keys 
 	chown -R $username:$username /home/$username/.ssh
         chmod 700 /home/$username/.ssh
 	chmod 600 /home/$username/.ssh/authorized_keys
