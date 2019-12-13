@@ -51,10 +51,25 @@ func removeString(slice []string, s string) (result []string) {
 	return
 }
 
-// this function connect as root to remote machine and create a new user named with his studentID
-func AddUser(studentID string, publicKey string) (err error) {
+type Connection struct {
+	remoteAddr string
+	remotePort string
+	remoteUser string
+	publicKey  string
+	newUser    string
+}
 
-	key, err := ioutil.ReadFile("/home/davide/.ssh/id_rsa")
+const (
+	PRIVATE_KEY  string = "/home/davide/.ssh/id_rsa"
+	BASTION      string = "bastion"
+	BASTION_ADDR string = "130.192.225.74:22"
+	HOME         string = "/home/"
+)
+
+// this function connect as root to remote machine and create a new user named with his studentID
+func AddUser(c Connection) (err error) {
+
+	key, err := ioutil.ReadFile(PRIVATE_KEY) // path to bastion private key authentication
 	if err != nil {
 		return
 	}
@@ -65,32 +80,33 @@ func AddUser(studentID string, publicKey string) (err error) {
 	}
 
 	config := &ssh.ClientConfig{
-		User: "bastion",
+		User: BASTION,
 		Auth: []ssh.AuthMethod{
 			ssh.PublicKeys(signer),
 		},
 		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
 	}
 
-	bClient, err := ssh.Dial("tcp", "130.192.225.74:22", config)
+	bClient, err := ssh.Dial("tcp", BASTION_ADDR, config)
 	if err != nil {
 		return
 	}
 
-	conn, err := bClient.Dial("tcp", "10.244.2.199:22")
+	rAddr := c.remoteAddr + ":" + c.remotePort
+	conn, err := bClient.Dial("tcp", rAddr) // start dialing with remote server
 	if err != nil {
 		return
 	}
 
 	config = &ssh.ClientConfig{
-		User: "davide",
+		User: c.remoteUser,
 		Auth: []ssh.AuthMethod{
 			ssh.PublicKeys(signer),
 		},
 		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
 	}
 
-	ncc, chans, reqs, err := ssh.NewClientConn(conn, "10.244.2.199:22", config)
+	ncc, chans, reqs, err := ssh.NewClientConn(conn, rAddr, config)
 	if err != nil {
 		return
 	}
@@ -103,16 +119,23 @@ func AddUser(studentID string, publicKey string) (err error) {
 	}
 	defer session.Close()
 
-	file, err := os.Create("pkey")
-	if err != nil {
-		return err
-	}
-	defer file.Close()
+	// keyPath := HOME + c.remoteUser + "/tmp/" + c.newUser -> where to write user key in pod
 
-	_, err = io.Copy(file, strings.NewReader(publicKey))
+	file, err := os.Create(c.newUser) //filename
 	if err != nil {
 		return err
 	}
+
+	_, err = io.Copy(file, strings.NewReader(c.publicKey))
+	if err != nil {
+		return err
+	}
+
+	file.Close()
+
+	file, _ = os.Open(c.newUser)
+
+	defer file.Close()
 
 	stat, _ := file.Stat()
 
@@ -122,61 +145,22 @@ func AddUser(studentID string, publicKey string) (err error) {
 	go func() {
 		hostIn, _ := session.StdinPipe()
 		defer hostIn.Close()
-		fmt.Fprintf(hostIn, "C0664 %d %s\n", stat.Size(), "filecopyname")
+		fmt.Fprintf(hostIn, "C0664 %d %s\n", stat.Size(), c.newUser+".pub") // file name in the remote host, s263084.pub
 		io.Copy(hostIn, file)
 		fmt.Fprint(hostIn, "\x00")
 		wg.Done()
 	}()
 
-	session.Run("/usr/bin/scp -t /remotedirectory/")
-	wg.Wait()
-
-	/*var b bytes.Buffer
+	var b bytes.Buffer
 	session.Stdout = &b
-	cmd := "sudo ./addStudent.sh " + studentID
-
+	keyPath := HOME + c.remoteUser                                         // where to copy the publicKey in the remote server
+	cmd := "/usr/bin/scp -t " + keyPath + "; ./addstudent.sh " + c.newUser // scp copies pKey in remote server, addstudent.sh copies it in new user
 	if err = session.Run(cmd); err != nil {
 		return
 	}
-	fmt.Println(b.String())*/
 
-	return nil
-}
-
-// this func connect through SSH to the user just created and copies the provided Public SSH Key
-func CopySSHKey(studentID string) (err error) {
-	// Use SSH key authentication from the auth package
-	// we ignore the host key
-	clientConfig, _ := auth.PasswordKey(studentID, "root", ssh.InsecureIgnoreHostKey())
-
-	// Create a new SCP client
-	// TODO set dinamically address
-	client := scp.NewClient("192.168.122.16:22", &clientConfig)
-
-	// Connect to the remote server
-	err = client.Connect()
-	if err != nil {
-		return
-	}
-
-	// Open a file
-	// TODO change file path and set home dinamically
-	// TODO read key from the yaml (?)
-	f, _ := os.Open("/home/davide/.ssh/id_rsa.pub")
-
-	// Close client connection after the file has been copied
-	defer client.Close()
-
-	// Close the file after it has been copied
-	defer f.Close()
-
-	// Finaly, copy the file over
-	// Usage: CopyFile(fileReader, remotePath, permission)
-	// TODO change file path
-	err = client.CopyFile(f, "./.ssh/authorized_keys", "0700")
-	if err != nil {
-		return
-	}
+	fmt.Println(b.String())
+	wg.Wait()
 
 	return nil
 }
@@ -341,19 +325,21 @@ func (r *CreateReconcileStudentAPI) Reconcile(request reconcile.Request) (reconc
 		}
 	}
 
-	err = AddUser(instance.Spec.ID, instance.Spec.PublicKey)
+	conn := Connection{
+		remoteAddr: "10.244.2.199",
+		remoteUser: "davide",
+		remotePort: "22",
+		publicKey:  instance.Spec.PublicKey,
+		newUser:    instance.Spec.ID,
+	}
+
+	err = AddUser(conn)
 	if err != nil {
 		errLogger := log.WithValues("Error", err)
 		errLogger.Error(err, "Error")
 	} else {
-		err = CopySSHKey(instance.Spec.ID)
-		if err != nil {
-			errLogger := log.WithValues("Error", err)
-			errLogger.Error(err, "Error")
-		} else {
-			reqLogger := log.WithValues("Student ID", instance.Spec.ID)
-			reqLogger.Info("Created new student")
-		}
+		reqLogger := log.WithValues("Student ID", instance.Spec.ID)
+		reqLogger.Info("Created new student")
 	}
 
 	return reconcile.Result{}, nil
