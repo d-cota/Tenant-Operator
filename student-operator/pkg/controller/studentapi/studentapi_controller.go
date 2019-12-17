@@ -9,8 +9,6 @@ import (
 	"strings"
 	"sync"
 
-	scp "github.com/bramvdbogaerde/go-scp"
-	"github.com/bramvdbogaerde/go-scp/auth"
 	netgroupv1 "github.com/example-inc/memcached-operator/pkg/apis/netgroup/v1"
 	"golang.org/x/crypto/ssh"
 	"io/ioutil"
@@ -65,15 +63,15 @@ const (
 	FINALIZER    string = "StudentFinalizer"
 )
 
-func EstablishConnection(remoteAddr string, remotePort string, remoteUser string) (*Session, error) {
+func EstablishConnection(remoteAddr string, remotePort string, remoteUser string) (*ssh.Session, error) {
 	key, err := ioutil.ReadFile(PRIVATE_KEY) // path to bastion private key authentication
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	signer, err := ssh.ParsePrivateKey(key)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	config := &ssh.ClientConfig{
@@ -86,13 +84,13 @@ func EstablishConnection(remoteAddr string, remotePort string, remoteUser string
 
 	bClient, err := ssh.Dial("tcp", BASTION_ADDR, config)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	rAddr := remoteAddr + ":" + remotePort
 	conn, err := bClient.Dial("tcp", rAddr) // start dialing with remote server
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	config = &ssh.ClientConfig{
@@ -105,7 +103,7 @@ func EstablishConnection(remoteAddr string, remotePort string, remoteUser string
 
 	ncc, chans, reqs, err := ssh.NewClientConn(conn, rAddr, config)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	sClient := ssh.NewClient(ncc, chans, reqs)
@@ -117,18 +115,21 @@ func EstablishConnection(remoteAddr string, remotePort string, remoteUser string
 func AddUser(c Connection) (err error) {
 
 	session, err := EstablishConnection(c.remoteAddr, c.remotePort, c.remoteUser)
+	if err != nil {
+		return
+	}
 	defer session.Close()
 
 	// keyPath := "/tmp/" + c.newUser -> where to write user key in pod
 
 	file, err := os.Create(c.newUser) //filename
 	if err != nil {
-		return err
+		return 
 	}
 
 	_, err = io.Copy(file, strings.NewReader(c.publicKey))
 	if err != nil {
-		return err
+		return 
 	}
 
 	file.Close()
@@ -154,7 +155,7 @@ func AddUser(c Connection) (err error) {
 	var b bytes.Buffer
 	session.Stdout = &b
 	keyPath := HOME + c.remoteUser                                         // where to copy the publicKey in the remote server
-	cmd := "/usr/bin/scp -t " + keyPath + "; ./addstudent.sh " + c.newUser // scp copies pKey in remote server, addstudent.sh copies it in new user
+	cmd := "/usr/bin/scp -t " + keyPath + ";sudo ./addstudent.sh " + c.newUser // scp copies pKey in remote server, addstudent.sh copies it in new user
 	if err = session.Run(cmd); err != nil {
 		return
 	}
@@ -172,8 +173,8 @@ func DeleteUser(c Connection) (err error) {
 
 	var b bytes.Buffer
 	session.Stdout = &b
-	cmd := "pkill -KILL -u " + studentID + "; deluser --remove-home " + studentID
-	if err = client.Session.Run(cmd); err != nil {
+	cmd := "pkill -KILL -u " + c.newUser + "; deluser --remove-home " + c.newUser
+	if err = session.Run(cmd); err != nil {
 		return
 	}
 	fmt.Println(b.String())
@@ -311,7 +312,7 @@ func (r *CreateReconcileStudentAPI) Reconcile(request reconcile.Request) (reconc
 	}
 
 	conn := Connection{
-		remoteAddr: "10.244.2.199",
+		remoteAddr: "10.244.3.164",
 		remoteUser: "davide",
 		remotePort: "22",
 		publicKey:  instance.Spec.PublicKey,
@@ -343,7 +344,7 @@ func (r *DeleteReconcileStudentAPI) Reconcile(request reconcile.Request) (reconc
 	}
 
 	conn := Connection{
-		remoteAddr: "10.244.2.199",
+		remoteAddr: "10.244.3.164",
 		remoteUser: "davide",
 		remotePort: "22",
 		publicKey:  instance.Spec.PublicKey,
