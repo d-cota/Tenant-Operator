@@ -4,10 +4,11 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"os"
+	"strings"
+	"sync"
 
-	scp "github.com/bramvdbogaerde/go-scp"
-	"github.com/bramvdbogaerde/go-scp/auth"
 	netgroupv1 "github.com/example-inc/memcached-operator/pkg/apis/netgroup/v1"
 	"golang.org/x/crypto/ssh"
 	"io/ioutil"
@@ -25,8 +26,6 @@ import (
 )
 
 var log = logf.Log.WithName("controller_studentapi")
-
-var finalizer string = "StudentFinalizer"
 
 // Helper functions to check and remove string from a slice of strings.
 func containsString(slice []string, s string) bool {
@@ -48,132 +47,134 @@ func removeString(slice []string, s string) (result []string) {
 	return
 }
 
-// this function connect as root to remote machine and create a new user named with his studentID
-func AddUser(studentID string) (err error) {
+type Connection struct {
+	remoteAddr string
+	remotePort string
+	remoteUser string
+	publicKey  string
+	newUser    string
+}
 
-	key, err := ioutil.ReadFile("/etc/secret-volume/ssh-privatekey")
+const (
+	PRIVATE_KEY  string = "/home/davide/.ssh/id_rsa"
+	BASTION      string = "bastion"
+	BASTION_ADDR string = "130.192.225.74:22"
+	HOME         string = "/home/"
+	FINALIZER    string = "StudentFinalizer"
+)
+
+func EstablishConnection(remoteAddr string, remotePort string, remoteUser string) (*ssh.Session, error) {
+	key, err := ioutil.ReadFile(PRIVATE_KEY) // path to bastion private key authentication
 	if err != nil {
-		return
+		return nil, err
 	}
 
 	signer, err := ssh.ParsePrivateKey(key)
 	if err != nil {
-		return
+		return nil, err
 	}
 
 	config := &ssh.ClientConfig{
-		User: "bastion",
+		User: BASTION,
 		Auth: []ssh.AuthMethod{
 			ssh.PublicKeys(signer),
 		},
 		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
 	}
 
-	bClient, err := ssh.Dial("tcp", "130.192.225.74:22", config)
+	bClient, err := ssh.Dial("tcp", BASTION_ADDR, config)
 	if err != nil {
-		return
+		return nil, err
 	}
 
-	conn, err := bClient.Dial("tcp", "10.244.2.199:22")
+	rAddr := remoteAddr + ":" + remotePort
+	conn, err := bClient.Dial("tcp", rAddr) // start dialing with remote server
 	if err != nil {
-		return
+		return nil, err
 	}
 
 	config = &ssh.ClientConfig{
-		User: "davide",
+		User: remoteUser,
 		Auth: []ssh.AuthMethod{
 			ssh.PublicKeys(signer),
 		},
 		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
 	}
 
-	ncc, chans, reqs, err := ssh.NewClientConn(conn, "10.244.2.199:22", config)
+	ncc, chans, reqs, err := ssh.NewClientConn(conn, rAddr, config)
 	if err != nil {
-		return
+		return nil, err
 	}
 
 	sClient := ssh.NewClient(ncc, chans, reqs)
 
-	session, err := sClient.NewSession()
+	return sClient.NewSession()
+}
+
+// this function connect as root to remote machine and create a new user named with his studentID
+func AddUser(c Connection) (err error) {
+
+	session, err := EstablishConnection(c.remoteAddr, c.remotePort, c.remoteUser)
 	if err != nil {
 		return
 	}
+	defer session.Close()
 
+	keyPath := "/tmp/" + c.newUser // where to write user key in pod
+
+	file, err := os.Create(keyPath) //filename
+	if err != nil {
+		return 
+	}
+
+	_, err = io.Copy(file, strings.NewReader(c.publicKey))
+	if err != nil {
+		return 
+	}
+
+	file.Close()
+
+	file, _ = os.Open(c.newUser)
+
+	defer file.Close()
+
+	stat, _ := file.Stat()
+
+	wg := sync.WaitGroup{}
+	wg.Add(1)
+
+	go func() {
+		hostIn, _ := session.StdinPipe()
+		defer hostIn.Close()
+		fmt.Fprintf(hostIn, "C0664 %d %s\n", stat.Size(), c.newUser + ".pub") // file name in the remote host, s263084.pub
+		io.Copy(hostIn, file)
+		fmt.Fprint(hostIn, "\x00")
+		wg.Done()
+	}()
+
+	var b bytes.Buffer
+	session.Stdout = &b
+	keyPath := HOME + c.remoteUser                                         // where to copy the publicKey in the remote server
+	cmd := "/usr/bin/scp -t " + keyPath + ";sudo ./addstudent.sh " + c.newUser // scp copies pKey in remote server, addstudent.sh copies it in new user
+	if err = session.Run(cmd); err != nil {
+		return
+	}
+
+	log.Info(b.String())
+	wg.Wait()
+
+	return nil
+}
+
+func DeleteUser(c Connection) (err error) {
+
+	session, err := EstablishConnection(c.remoteAddr, c.remotePort, c.remoteUser)
 	defer session.Close()
 
 	var b bytes.Buffer
 	session.Stdout = &b
-	cmd := "sudo ./addstudent.sh " + studentID
+	cmd := "pkill -KILL -u " + c.newUser + "; deluser --remove-home " + c.newUser
 	if err = session.Run(cmd); err != nil {
-		return
-	}
-	fmt.Println(b.String())
-
-	return nil
-}
-
-// this func connect through SSH to the user just created and copies the provided Public SSH Key
-func CopySSHKey(studentID string) (err error) {
-	// Use SSH key authentication from the auth package
-	// we ignore the host key
-	clientConfig, _ := auth.PasswordKey(studentID, "root", ssh.InsecureIgnoreHostKey())
-
-	// Create a new SCP client
-	// TODO set dinamically address
-	client := scp.NewClient("192.168.122.16:22", &clientConfig)
-
-	// Connect to the remote server
-	err = client.Connect()
-	if err != nil {
-		return
-	}
-
-	// Open a file
-	// TODO change file path and set home dinamically
-	// TODO read key from the yaml (?)
-	f, _ := os.Open("/home/davide/.ssh/id_rsa.pub")
-
-	// Close client connection after the file has been copied
-	defer client.Close()
-
-	// Close the file after it has been copied
-	defer f.Close()
-
-	// Finaly, copy the file over
-	// Usage: CopyFile(fileReader, remotePath, permission)
-	// TODO change file path
-	err = client.CopyFile(f, "./.ssh/authorized_keys", "0700")
-	if err != nil {
-		return
-	}
-
-	return nil
-}
-
-// TODO merge with AddUser
-func DeleteUser(studentID string) (err error) {
-
-	// Use SSH key authentication from the auth package
-	// we ignore the host key
-	clientConfig, _ := auth.PasswordKey("root", "root", ssh.InsecureIgnoreHostKey())
-
-	// Create a new SCP client
-	// TODO set dinamically address
-	client := scp.NewClient("192.168.122.16:22", &clientConfig)
-
-	// Connect to the remote server
-	err = client.Connect()
-	if err != nil {
-		return
-	}
-
-	// Close client connection after the file has been copied
-	defer client.Close()
-
-	var b bytes.Buffer
-	client.Session.Stdout = &b
-	cmd := "pkill -KILL -u " + studentID + "; deluser --remove-home " + studentID
-	if err = client.Session.Run(cmd); err != nil {
 		return
 	}
 	fmt.Println(b.String())
@@ -303,29 +304,30 @@ func (r *CreateReconcileStudentAPI) Reconcile(request reconcile.Request) (reconc
 	// The object is being created, so if it does not have our finalizer,
 	// then lets add the finalizer and update the object.
 	// This is equivalent to register the finalizer
-	/*if !containsString(instance.Finalizers, finalizer) {
-		instance.Finalizers = append(instance.Finalizers, finalizer)
+	/*if !containsString(instance.Finalizers, FINALIZER) {
+		instance.Finalizers = append(instance.Finalizers, FINALIZER)
 		if err = r.client.Update(context.TODO(), instance); err != nil {
 			return reconcile.Result{}, err
 		}
 	}*/
 
-	err = AddUser(instance.Spec.ID)
+	conn := Connection{
+		remoteAddr: "10.244.3.164",
+		remoteUser: "davide",
+		remotePort: "22",
+		publicKey:  instance.Spec.PublicKey,
+		newUser:    instance.Spec.ID,
+	}
+
+	err = AddUser(conn)
 	if err != nil {
 		errLogger := log.WithValues("Error", err)
 		errLogger.Error(err, "Error")
+		// TODO re-reconcile, don't stop 
+		// TODO initializer
 	} else {
 		reqLogger := log.WithValues("Student ID", instance.Spec.ID)
 		reqLogger.Info("Created new student")
-		/*
-		err = CopySSHKey(instance.Spec.ID)
-		if err != nil {
-			errLogger := log.WithValues("Error", err)
-			errLogger.Error(err, "Error")
-		} else {
-			reqLogger := log.WithValues("Student ID", instance.Spec.ID)
-			reqLogger.Info("Created new student")
-		}*/
 	}
 
 	return reconcile.Result{}, nil
@@ -341,19 +343,33 @@ func (r *DeleteReconcileStudentAPI) Reconcile(request reconcile.Request) (reconc
 		return reconcile.Result{}, client.IgnoreNotFound(err)
 	}
 
+	conn := Connection{
+		remoteAddr: "10.244.3.164",
+		remoteUser: "davide",
+		remotePort: "22",
+		publicKey:  instance.Spec.PublicKey,
+		newUser:    instance.Spec.ID,
+	}
+
 	// look for matching finalizers
-	if containsString(instance.Finalizers, finalizer) {
+	/*if containsString(instance.Finalizers, FINALIZER) {
 		// if requested finalizer is present, we will handle the
 		// deletion of external resource, i.e. a user account
-		if err = DeleteUser(instance.Spec.ID); err != nil {
+		if err = DeleteUser(conn); err != nil {
 			// if fail to delete the external dependency here, return with error
 			// so that it can be retried
 			return reconcile.Result{}, err
 		}
 
 		// remove our finalizer from the list and update it.
-		instance.Finalizers = removeString(instance.Finalizers, finalizer)
+		instance.Finalizers = removeString(instance.Finalizers, FINALIZER)
 		if err = r.client.Update(context.TODO(), instance); err != nil {
+			return reconcile.Result{}, err
+		}*/
+
+		if err = DeleteUser(conn); err != nil {
+			// if fail to delete the external dependency here, return with error
+			// so that it can be retried
 			return reconcile.Result{}, err
 		}
 
@@ -367,14 +383,8 @@ func (r *DeleteReconcileStudentAPI) Reconcile(request reconcile.Request) (reconc
 
 // TODO login on multiple machines (maybe watching the kubernetes label)
 // TODO add label on CR to distinguish accessible machines
-// TODO operator to manage the machines (and synchronize the access when a machine is created/deleted)
-// TODO initializer e get stati utenti
+// TODO synchronize the access when a machine is created/deleted
+// TODO quanti utenti connessi
 // TODO handle all possible errors
 // TODO refactor with class
-// TODO testing
-// TODO change auth method on server (no pass but key)
 // TODO add name and surname when registering
-
-// TODO operatore per creare configmap (?), watchare configmap (crd per i server, operator che watcha le server cr e triggera un evento alla create/delete)
-// TODO aggiungere ruolo a studente, label, Bastion conterrà tutte le label, netgroup server contiene solo 'tesisti' e 'prof'
-// TODO montare folder file da configurazione, mettere file dentro configmap

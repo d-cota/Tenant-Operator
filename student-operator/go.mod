@@ -3,7 +3,7 @@ module github.com/example-inc/memcached-operator
 go 1.13
 
 require (
-	github.com/bramvdbogaerde/go-scp v0.0.0-20191005185035-c96fe084709e
+	github.com/bramvdbogaerde/go-scp v0.0.0-20191005185035-c96fe084709e // indirect
 	github.com/go-openapi/spec v0.19.0
 	github.com/operator-framework/operator-sdk v0.12.0
 	github.com/spf13/pflag v1.0.3
