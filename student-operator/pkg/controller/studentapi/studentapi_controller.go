@@ -25,7 +25,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/source"
 )
 
-var log = logf.Log.WithName("controller_studentapi")
+var c_log = logf.Log.WithName("controller_create_studentapi")
+var d_log = logf.Log.WithName("controller_delete_studentapi")
 
 // Helper functions to check and remove string from a slice of strings.
 func containsString(slice []string, s string) bool {
@@ -168,7 +169,7 @@ func AddUser(c Connection) (err error) {
 		return
 	}
 
-	log.Info(fmt.Sprintf(b.String()))
+	c_log.Info(fmt.Sprintf(b.String()))
 	wg.Wait()
 
 	return nil
@@ -186,7 +187,9 @@ func DeleteUser(c Connection) (err error) {
 		return
 	}
 
-	log.Info(fmt.Sprintf(b.String()))
+	//TODO implement cleanup resources in pod and remote server
+
+	d_log.Info(fmt.Sprintf(b.String()))
 
 	return nil
 
@@ -330,14 +333,14 @@ func (r *CreateReconcileStudentAPI) Reconcile(request reconcile.Request) (reconc
 
 	err = AddUser(conn)
 	if err != nil {
-		errLogger := log.WithValues("Error", err)
+		errLogger := c_log.WithValues("Error", err)
 		errLogger.Error(err, "Error")
 		// TODO re-reconcile, don't stop 
 		// TODO initializer
 
 		//return reconcile.Result{}, err
 	} else {
-		reqLogger := log.WithValues("Student ID", instance.Spec.ID)
+		reqLogger := c_log.WithValues("Student ID", instance.Spec.ID)
 		reqLogger.Info("Created new student")
 	}
 
@@ -381,7 +384,7 @@ func (r *DeleteReconcileStudentAPI) Reconcile(request reconcile.Request) (reconc
 	}
 
 
-		reqLogger := log.WithValues("Student ID", instance.Spec.ID)
+		reqLogger := d_log.WithValues("Student ID", instance.Spec.ID)
 		reqLogger.Info("Deleted student")
 
 
