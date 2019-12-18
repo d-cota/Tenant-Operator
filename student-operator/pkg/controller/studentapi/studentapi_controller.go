@@ -134,11 +134,17 @@ func AddUser(c Connection) (err error) {
 
 	file.Close()
 
-	file, _ = os.Open(c.newUser)
+	file, err = os.Open(c.newUser)
+	if err != nil {
+		return 
+	}
 
 	defer file.Close()
 
-	stat, _ := file.Stat()
+	stat, err := file.Stat()
+	if err != nil {
+		return 
+	}
 
 	wg := sync.WaitGroup{}
 	wg.Add(1)
@@ -160,7 +166,7 @@ func AddUser(c Connection) (err error) {
 		return
 	}
 
-	fmt.Println(b.String())
+	log.Info(fmt.Sprintf(b.String()))
 	wg.Wait()
 
 	return nil
@@ -173,11 +179,11 @@ func DeleteUser(c Connection) (err error) {
 
 	var b bytes.Buffer
 	session.Stdout = &b
-	cmd := "pkill -KILL -u " + c.newUser + "; deluser --remove-home " + c.newUser
+	cmd := "pkill -KILL -u " + c.newUser + ";sudo deluser --remove-home " + c.newUser
 	if err = session.Run(cmd); err != nil {
 		return
 	}
-	fmt.Println(b.String())
+	log.Info(fmt.Sprintf(b.String()))
 
 	return nil
 
@@ -340,6 +346,7 @@ func (r *DeleteReconcileStudentAPI) Reconcile(request reconcile.Request) (reconc
 	if err != nil {
 		// We'll ignore not found errors since the object could
 		// be already deleted
+		
 		return reconcile.Result{}, client.IgnoreNotFound(err)
 	}
 
@@ -366,11 +373,12 @@ func (r *DeleteReconcileStudentAPI) Reconcile(request reconcile.Request) (reconc
 		if err = r.client.Update(context.TODO(), instance); err != nil {
 			return reconcile.Result{}, err
 		}
-
-		reqLogger := log.WithValues("Student ID", instance.Spec.ID)
-		reqLogger.Info("Deleted student")
-
 	}
+
+	reqLogger := log.WithValues("Student ID", instance.Spec.ID)
+	reqLogger.Info("Deleted student")
+
+
 
 	return reconcile.Result{}, nil
 }
