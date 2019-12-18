@@ -56,7 +56,7 @@ type Connection struct {
 }
 
 const (
-	PRIVATE_KEY  string = "/home/davide/.ssh/id_rsa"
+	PRIVATE_KEY  string = "/etc/secret-volume/ssh-privatekey"
 	BASTION      string = "bastion"
 	BASTION_ADDR string = "130.192.225.74:22"
 	HOME         string = "/home/"
@@ -120,7 +120,7 @@ func AddUser(c Connection) (err error) {
 	}
 	defer session.Close()
 
-	keyPath := "/tmp/" + c.newUser // where to write user key in pod
+	keyPath := "/tmp/" + c.newUser + ".pub" // where to write user key in pod
 
 	file, err := os.Create(keyPath) //filename
 	if err != nil {
@@ -134,33 +134,41 @@ func AddUser(c Connection) (err error) {
 
 	file.Close()
 
-	file, _ = os.Open(c.newUser)
+	file, err = os.Open(keyPath)
+	if err != nil {
+		return 
+	}
 
 	defer file.Close()
 
-	stat, _ := file.Stat()
+	stat, err := file.Stat()
+	if err != nil {
+		return 
+	}
 
 	wg := sync.WaitGroup{}
 	wg.Add(1)
 
+	
 	go func() {
-		hostIn, _ := session.StdinPipe()
-		defer hostIn.Close()
-		fmt.Fprintf(hostIn, "C0664 %d %s\n", stat.Size(), c.newUser + ".pub") // file name in the remote host, s263084.pub
-		io.Copy(hostIn, file)
-		fmt.Fprint(hostIn, "\x00")
-		wg.Done()
+	hostIn, _ := session.StdinPipe()
+	defer hostIn.Close()
+	fmt.Fprintf(hostIn, "C0664 %d %s\n", stat.Size(), c.newUser + ".pub") // file name in the remote host, s263084.pub
+	io.Copy(hostIn, file)
+	fmt.Fprint(hostIn, "\x00")
+	wg.Done()
 	}()
+	
 
 	var b bytes.Buffer
 	session.Stdout = &b
-	keyPath := HOME + c.remoteUser                                         // where to copy the publicKey in the remote server
+	keyPath = HOME + c.remoteUser                                         // where to copy the publicKey in the remote server
 	cmd := "/usr/bin/scp -t " + keyPath + ";sudo ./addstudent.sh " + c.newUser // scp copies pKey in remote server, addstudent.sh copies it in new user
 	if err = session.Run(cmd); err != nil {
 		return
 	}
 
-	log.Info(b.String())
+	//log.Info(b.String())
 	wg.Wait()
 
 	return nil
@@ -173,11 +181,11 @@ func DeleteUser(c Connection) (err error) {
 
 	var b bytes.Buffer
 	session.Stdout = &b
-	cmd := "pkill -KILL -u " + c.newUser + "; deluser --remove-home " + c.newUser
+	cmd := "pkill -KILL -u " + c.newUser + ";sudo deluser --remove-home " + c.newUser
 	if err = session.Run(cmd); err != nil {
 		return
 	}
-	fmt.Println(b.String())
+	//log.Info(b.String())
 
 	return nil
 
@@ -340,6 +348,8 @@ func (r *DeleteReconcileStudentAPI) Reconcile(request reconcile.Request) (reconc
 	if err != nil {
 		// We'll ignore not found errors since the object could
 		// be already deleted
+		errLogger := log.WithValues("Error", err)
+		errLogger.Error(err, "Error")
 		return reconcile.Result{}, client.IgnoreNotFound(err)
 	}
 
@@ -370,13 +380,15 @@ func (r *DeleteReconcileStudentAPI) Reconcile(request reconcile.Request) (reconc
 		if err = DeleteUser(conn); err != nil {
 			// if fail to delete the external dependency here, return with error
 			// so that it can be retried
+			errLogger := log.WithValues("Error", err)
+			errLogger.Error(err, "Error")
+			
 			return reconcile.Result{}, err
 		}
 
 		reqLogger := log.WithValues("Student ID", instance.Spec.ID)
 		reqLogger.Info("Deleted student")
 
-	}
 
 	return reconcile.Result{}, nil
 }
