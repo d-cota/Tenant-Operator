@@ -168,7 +168,7 @@ func AddUser(c Connection) (err error) {
 		return
 	}
 
-	//log.Info(b.String())
+	log.Info(fmt.Sprintf(b.String()))
 	wg.Wait()
 
 	return nil
@@ -185,7 +185,8 @@ func DeleteUser(c Connection) (err error) {
 	if err = session.Run(cmd); err != nil {
 		return
 	}
-	//log.Info(b.String())
+
+	log.Info(fmt.Sprintf(b.String()))
 
 	return nil
 
@@ -312,12 +313,12 @@ func (r *CreateReconcileStudentAPI) Reconcile(request reconcile.Request) (reconc
 	// The object is being created, so if it does not have our finalizer,
 	// then lets add the finalizer and update the object.
 	// This is equivalent to register the finalizer
-	/*if !containsString(instance.Finalizers, FINALIZER) {
+	if !containsString(instance.Finalizers, FINALIZER) {
 		instance.Finalizers = append(instance.Finalizers, FINALIZER)
 		if err = r.client.Update(context.TODO(), instance); err != nil {
 			return reconcile.Result{}, err
 		}
-	}*/
+	}
 
 	conn := Connection{
 		remoteAddr: "10.244.3.164",
@@ -333,6 +334,8 @@ func (r *CreateReconcileStudentAPI) Reconcile(request reconcile.Request) (reconc
 		errLogger.Error(err, "Error")
 		// TODO re-reconcile, don't stop 
 		// TODO initializer
+
+		//return reconcile.Result{}, err
 	} else {
 		reqLogger := log.WithValues("Student ID", instance.Spec.ID)
 		reqLogger.Info("Created new student")
@@ -348,8 +351,7 @@ func (r *DeleteReconcileStudentAPI) Reconcile(request reconcile.Request) (reconc
 	if err != nil {
 		// We'll ignore not found errors since the object could
 		// be already deleted
-		errLogger := log.WithValues("Error", err)
-		errLogger.Error(err, "Error")
+		
 		return reconcile.Result{}, client.IgnoreNotFound(err)
 	}
 
@@ -362,7 +364,7 @@ func (r *DeleteReconcileStudentAPI) Reconcile(request reconcile.Request) (reconc
 	}
 
 	// look for matching finalizers
-	/*if containsString(instance.Finalizers, FINALIZER) {
+	if containsString(instance.Finalizers, FINALIZER) {
 		// if requested finalizer is present, we will handle the
 		// deletion of external resource, i.e. a user account
 		if err = DeleteUser(conn); err != nil {
@@ -375,16 +377,9 @@ func (r *DeleteReconcileStudentAPI) Reconcile(request reconcile.Request) (reconc
 		instance.Finalizers = removeString(instance.Finalizers, FINALIZER)
 		if err = r.client.Update(context.TODO(), instance); err != nil {
 			return reconcile.Result{}, err
-		}*/
-
-		if err = DeleteUser(conn); err != nil {
-			// if fail to delete the external dependency here, return with error
-			// so that it can be retried
-			errLogger := log.WithValues("Error", err)
-			errLogger.Error(err, "Error")
-			
-			return reconcile.Result{}, err
 		}
+	}
+
 
 		reqLogger := log.WithValues("Student ID", instance.Spec.ID)
 		reqLogger.Info("Deleted student")
