@@ -9,10 +9,12 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"io/ioutil"
 
 	netgroupv1 "github.com/example-inc/memcached-operator/pkg/apis/netgroup/v1"
+	"k8s.io/api/core/v1"
 	"golang.org/x/crypto/ssh"
-	"io/ioutil"
+	"github.com/goccy/go-yaml"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -218,10 +220,17 @@ func DeleteUser(c Connection) (err error) {
 
 }
 
+type keyValuePair struct {
+	key   string
+	value string
+}
+
+var kvp keyValuePair
+
 // Add creates two new StudentAPI Controllers and adds them to the Manager. The Manager will set fields on the Controller
 // and Start it when the Manager is Started.
 func Add(mgr manager.Manager) error {
-	return add(mgr, newReconcilerCreate(mgr), newReconcilerDelete(mgr))
+	return add(mgr, newReconcilerCreate(mgr), newReconcilerDelete(mgr), newReconcilerCreateServer(mgr), newReconcilerDeleteServer(mgr))
 }
 
 // newReconcilerCreate returns a new reconcile.Reconciler
@@ -234,17 +243,27 @@ func newReconcilerDelete(mgr manager.Manager) reconcile.Reconciler {
 	return &DeleteReconcileStudentAPI{client: mgr.GetClient(), scheme: mgr.GetScheme()}
 }
 
+// newReconcilerServer returns a new reconcile.Reconciler
+func newReconcilerCreateServer(mgr manager.Manager) reconcile.Reconciler {
+	return &ServerCreateReconcile{client: mgr.GetClient(), scheme: mgr.GetScheme()}
+}
+
+// newReconcilerServer returns a new reconcile.Reconciler
+func newReconcilerDeleteServer(mgr manager.Manager) reconcile.Reconciler {
+	return &ServerDeleteReconcile{client: mgr.GetClient(), scheme: mgr.GetScheme()}
+}
+
 // add adds new Controllers to mgr
-func add(mgr manager.Manager, rCreate reconcile.Reconciler, rDelete reconcile.Reconciler) error {
+func add(mgr manager.Manager, rCreate reconcile.Reconciler, rDelete reconcile.Reconciler, rCreateServer reconcile.Reconciler, rDeleteServer reconcile.Reconciler) error {
 	// Create a new controller for Create event
 	c_create, err := controller.New("create-controller", mgr, controller.Options{Reconciler: rCreate})
 	if err != nil {
 		return err
 	}
 
-	src_create := &source.Kind{Type: &netgroupv1.StudentAPI{}}
+	src_StudentAPI := &source.Kind{Type: &netgroupv1.StudentAPI{}}
 
-	h_create := &handler.EnqueueRequestForObject{}
+	h := &handler.EnqueueRequestForObject{}
 
 	pred_create := predicate.Funcs{
 		CreateFunc: func(e event.CreateEvent) bool {
@@ -260,7 +279,7 @@ func add(mgr manager.Manager, rCreate reconcile.Reconciler, rDelete reconcile.Re
 	}
 
 	// Watch for changes to primary resource StudentAPI
-	err = c_create.Watch(src_create, h_create, pred_create)
+	err = c_create.Watch(src_StudentAPI, h, pred_create)
 	if err != nil {
 		return err
 	}
@@ -270,10 +289,6 @@ func add(mgr manager.Manager, rCreate reconcile.Reconciler, rDelete reconcile.Re
 	if err != nil {
 		return err
 	}
-
-	src_delete := &source.Kind{Type: &netgroupv1.StudentAPI{}}
-
-	h_delete := &handler.EnqueueRequestForObject{}
 
 	pred_delete := predicate.Funcs{
 		DeleteFunc: func(e event.DeleteEvent) bool {
@@ -289,7 +304,78 @@ func add(mgr manager.Manager, rCreate reconcile.Reconciler, rDelete reconcile.Re
 	}
 
 	// Watch for changes to primary resource StudentAPI
-	err = c_delete.Watch(src_delete, h_delete, pred_delete)
+	err = c_delete.Watch(src_StudentAPI, h, pred_delete)
+	if err != nil {
+		return err
+	}
+
+	c_serv, err := controller.New("server-create-controller", mgr, controller.Options{Reconciler: rCreateServer})
+	if err != nil {
+		return err
+	}
+
+	src_serv := &source.Kind{Type: &v1.ConfigMap{}}
+
+	kvp := keyValuePair{ 
+		key:   "use",
+		value: "StudentAPI",
+	}
+
+	pred_serv_c := predicate.Funcs{
+		CreateFunc: func(e event.CreateEvent) bool {
+			labels := e.Meta.GetLabels()
+			if val, ok := labels[kvp.key]; ok {
+				if val == kvp.value {
+				return true
+			}
+		}
+		return false
+		},
+		UpdateFunc: func(e event.UpdateEvent) bool {
+			labels := e.MetaOld.GetLabels()
+			if val, ok := labels[kvp.key]; ok {
+				if val == kvp.value {
+				return true
+			}
+		}
+		return false
+		},
+		DeleteFunc: func(e event.DeleteEvent) bool {
+			return false
+		},
+	}
+
+	// Watch for changes to ConfigMaps
+	err = c_serv.Watch(src_serv, h, pred_serv_c)
+	if err != nil {
+		return err
+	}
+
+	c_servDelete, err := controller.New("server-delete-controller", mgr, controller.Options{Reconciler: rDeleteServer})
+	if err != nil {
+		return err
+	}
+
+	pred_serv_d := predicate.Funcs{
+		DeleteFunc: func(e event.DeleteEvent) bool {
+			labels := e.Meta.GetLabels()
+			if val, ok := labels[kvp.key]; ok {
+				if val == kvp.value {
+				return true
+			}
+		}
+		return false
+		},
+		CreateFunc: func(e event.CreateEvent) bool {
+			return false
+		},
+		UpdateFunc: func(e event.UpdateEvent) bool {
+			return false
+		},
+	}
+
+	// Watch for changes to ConfigMaps
+	err = c_servDelete.Watch(src_serv, h, pred_serv_d)
 	if err != nil {
 		return err
 	}
@@ -315,6 +401,67 @@ type DeleteReconcileStudentAPI struct {
 	scheme *runtime.Scheme
 }
 
+type ServerCreateReconcile struct {
+	client client.Client
+	scheme *runtime.Scheme
+}
+
+type ServerDeleteReconcile struct {
+	client client.Client
+	scheme *runtime.Scheme
+}
+
+func (r *ServerCreateReconcile) Reconcile (request reconcile.Request) (reconcile.Result, error) {
+	// Fetch the StudentAPI instance
+	instance := &v1.ConfigMap{}
+	err := r.client.Get(context.TODO(), request.NamespacedName, instance)
+	if err != nil {
+		if errors.IsNotFound(err) {
+			// Request object not found, could have been deleted after reconcile request.
+			// Owned objects are automatically garbage collected. For additional cleanup logic use finalizers.
+			// Return and don't requeue
+			return reconcile.Result{}, nil
+		}
+		// Error reading the object - requeue the request.
+		return reconcile.Result{}, err
+	}
+
+	yml := instance.Data["config"]
+
+    var config struct {
+		Remoteuser string `yaml:"remote-user"`
+		Remoteport string `yaml:"remote-port"`
+		Remoteaddr string `yaml:"remote-addr"`
+		Roles 	   []string `yaml:"roles"`
+	}
+
+	if err = yaml.Unmarshal([]byte(yml), &config); err != nil {
+		log.Error(err,err.Error())
+	}	
+
+	// here the logic to add all the users to the machine
+
+
+	log.Info(instance.Name)
+	return reconcile.Result{}, nil
+}
+
+func (r *ServerDeleteReconcile) Reconcile (request reconcile.Request) (reconcile.Result, error) {
+	// Fetch the StudentAPI instance
+	instance := &v1.ConfigMap{}
+	err := r.client.Get(context.TODO(), request.NamespacedName, instance)
+	if err != nil {
+		// We'll ignore not found errors since the object could
+		// be already deleted
+
+		return reconcile.Result{}, client.IgnoreNotFound(err)
+	}
+
+	log.Info("Deleted ConfigMap")
+
+	return reconcile.Result{}, nil
+}
+ 
 // Reconcile reads that state of the cluster for a StudentAPI object and makes changes based on the state read
 // and what is in the StudentAPI.Spec
 // The Controller will requeue the Request to be processed again if the returned error is non-nil or
@@ -358,14 +505,11 @@ func (r *CreateReconcileStudentAPI) Reconcile(request reconcile.Request) (reconc
 		errLogger := log.WithValues("Error", err)
 		errLogger.Error(err, "Error")*/
 		log.Error(err, err.Error())
-		// TODO re-reconcile, don't stop
-		// TODO initializer
-
 		return reconcile.Result{RequeueAfter: time.Second * 20}, nil
-	} else {
-		reqLogger := log.WithValues("Student ID", instance.Spec.ID)
-		reqLogger.Info("Created new student")
 	}
+
+	reqLogger := log.WithValues("Student ID", instance.Spec.ID)
+	reqLogger.Info("Created new student")
 
 	return reconcile.Result{}, nil
 }
@@ -419,3 +563,4 @@ func (r *DeleteReconcileStudentAPI) Reconcile(request reconcile.Request) (reconc
 // TODO handle all possible errors
 // TODO refactor with class
 // TODO add name and surname when registering
+// TODO use Spec and Status to see the running users
