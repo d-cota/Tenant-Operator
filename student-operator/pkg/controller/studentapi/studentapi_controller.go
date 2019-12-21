@@ -8,6 +8,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"time"
 
 	netgroupv1 "github.com/example-inc/memcached-operator/pkg/apis/netgroup/v1"
 	"golang.org/x/crypto/ssh"
@@ -111,7 +112,7 @@ func EstablishConnection(remoteAddr string, remotePort string, remoteUser string
 	return sClient.NewSession()
 }
 
-// this function connect as root to remote machine and create a new user named with his studentID
+// this function connects to the remote machine and creates a new user named with his studentID
 func AddUser(c Connection) (err error) {
 
 	session, err := EstablishConnection(c.remoteAddr, c.remotePort, c.remoteUser)
@@ -120,47 +121,45 @@ func AddUser(c Connection) (err error) {
 	}
 	defer session.Close()
 
-	// keyPath := "/tmp/" + c.newUser -> where to write user key in pod
-
 	file, err := os.Create(c.newUser) //filename
 	if err != nil {
-		return 
+		return
 	}
 
 	_, err = io.Copy(file, strings.NewReader(c.publicKey))
 	if err != nil {
-		return 
+		return
 	}
 
 	file.Close()
 
 	file, err = os.Open(c.newUser)
 	if err != nil {
-		return 
+		return
 	}
 
 	defer file.Close()
 
 	stat, err := file.Stat()
 	if err != nil {
-		return 
+		return
 	}
 
 	wg := sync.WaitGroup{}
 	wg.Add(1)
 
 	go func() {
-		hostIn, _ := session.StdinPipe()
-		defer hostIn.Close()
-		fmt.Fprintf(hostIn, "C0664 %d %s\n", stat.Size(), c.newUser+".pub") // file name in the remote host, s263084.pub
-		io.Copy(hostIn, file)
-		fmt.Fprint(hostIn, "\x00")
+		stdin, _ := session.StdinPipe()
+		defer stdin.Close()
+		fmt.Fprintf(stdin, "C0664 %d %s\n", stat.Size(), c.newUser+".pub") // file name in the remote host, s263084.pub
+		io.Copy(stdin, file)
+		fmt.Fprint(stdin, "\x00")
 		wg.Done()
 	}()
 
 	var b bytes.Buffer
 	session.Stdout = &b
-	keyPath := HOME + c.remoteUser                                         // where to copy the publicKey in the remote server
+	keyPath := HOME + c.remoteUser                                             // where to copy the publicKey in the remote server
 	cmd := "/usr/bin/scp -t " + keyPath + ";sudo ./addstudent.sh " + c.newUser // scp copies pKey in remote server, addstudent.sh copies it in new user
 	if err = session.Run(cmd); err != nil {
 		return
@@ -175,14 +174,44 @@ func AddUser(c Connection) (err error) {
 func DeleteUser(c Connection) (err error) {
 
 	session, err := EstablishConnection(c.remoteAddr, c.remotePort, c.remoteUser)
+	if err != nil {
+		return
+	}
 	defer session.Close()
+
+	// StdinPipe for commands
+	stdin, err := session.StdinPipe()
+	if err != nil {
+		return
+	}
+
+	err = session.Shell()
+	if err != nil {
+		return
+	}
 
 	var b bytes.Buffer
 	session.Stdout = &b
-	cmd := "pkill -KILL -u " + c.newUser + ";sudo deluser --remove-home " + c.newUser
-	if err = session.Run(cmd); err != nil {
+
+	commands := []string { 
+		"pkill -KILL -u " + c.newUser,
+		"sudo deluser --remove-home " + c.newUser,
+		"rm " + c.newUser + ".pub",
+		"exit",
+	}
+
+	for _, cmd := range commands {
+		_, err = fmt.Fprintf(stdin, "%s\n", cmd)
+		if err != nil {
+			return
+		}
+	}
+
+	err = session.Wait()
+	if err != nil {
 		return
 	}
+
 	log.Info(fmt.Sprintf(b.String()))
 
 	return nil
@@ -252,12 +281,10 @@ func add(mgr manager.Manager, rCreate reconcile.Reconciler, rDelete reconcile.Re
 		},
 		CreateFunc: func(e event.CreateEvent) bool {
 			return false
-			//return true
+
 		},
 		UpdateFunc: func(e event.UpdateEvent) bool {
 			return !e.MetaNew.GetDeletionTimestamp().IsZero()
-			//return false
-			//return true
 		},
 	}
 
@@ -327,10 +354,14 @@ func (r *CreateReconcileStudentAPI) Reconcile(request reconcile.Request) (reconc
 
 	err = AddUser(conn)
 	if err != nil {
+		/*
 		errLogger := log.WithValues("Error", err)
-		errLogger.Error(err, "Error")
-		// TODO re-reconcile, don't stop 
+		errLogger.Error(err, "Error")*/
+		log.Error(err, err.Error())
+		// TODO re-reconcile, don't stop
 		// TODO initializer
+
+		return reconcile.Result{RequeueAfter: time.Second * 20}, nil
 	} else {
 		reqLogger := log.WithValues("Student ID", instance.Spec.ID)
 		reqLogger.Info("Created new student")
@@ -346,7 +377,7 @@ func (r *DeleteReconcileStudentAPI) Reconcile(request reconcile.Request) (reconc
 	if err != nil {
 		// We'll ignore not found errors since the object could
 		// be already deleted
-		
+
 		return reconcile.Result{}, client.IgnoreNotFound(err)
 	}
 
@@ -377,8 +408,6 @@ func (r *DeleteReconcileStudentAPI) Reconcile(request reconcile.Request) (reconc
 
 	reqLogger := log.WithValues("Student ID", instance.Spec.ID)
 	reqLogger.Info("Deleted student")
-
-
 
 	return reconcile.Result{}, nil
 }
