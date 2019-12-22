@@ -439,10 +439,47 @@ func (r *ServerCreateReconcile) Reconcile (request reconcile.Request) (reconcile
 		log.Error(err,err.Error())
 	}	
 
-	// here the logic to add all the users to the machine
+	users := &netgroupv1.StudentAPIList{}
+	opts := []client.ListOption{
+		//client.MatchingFieldsSelector{Selector: fields.},
+		client.InNamespace(instance.Namespace),
+	}
+	err = r.client.List(context.TODO(), users, opts...)
+	if err != nil {
+		return reconcile.Result{}, err
+	}
 
+	// iterate over all objects
+	for _, user := range users.Items {
+		// iterate over roles of one object
+		for _, role := range user.Spec.Roles {
+			// if user role match with at least one of the server
+			// authorized role then AddUser()
 
-	log.Info(instance.Name)
+			// iterate over ConfigMap roles
+			if containsString(config.Roles, role) {
+				conn := Connection{
+					remoteAddr: config.Remoteaddr,
+					remoteUser: config.Remoteuser,
+					remotePort: config.Remoteport,
+					publicKey:  user.Spec.PublicKey,
+					newUser:    user.Spec.ID,
+				}
+
+				err = AddUser(conn)
+				if err != nil {
+					log.Error(err, err.Error())
+					// instead of return immediately try to set a label with "completed" and continue to add students
+					// maybe better on student add
+					return reconcile.Result{RequeueAfter: time.Second * 20}, nil
+				}
+
+				log.Info(fmt.Sprintf("User %s added to %s",user.Spec.ID, config.Remoteaddr))
+				break
+			}
+		}
+	}
+
 	return reconcile.Result{}, nil
 }
 

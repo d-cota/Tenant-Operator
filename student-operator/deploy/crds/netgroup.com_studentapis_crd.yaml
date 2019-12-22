@@ -43,6 +43,11 @@ spec:
               description: student PublickKey
               minLength: 1
               type: string
+            roles:
+              description: user roles
+              items:
+                type: string
+              type: array
             surname:
               description: student surname
               minLength: 1
@@ -51,6 +56,7 @@ spec:
           - id
           - name
           - publicKey
+          - roles
           - surname
           type: object
         status:

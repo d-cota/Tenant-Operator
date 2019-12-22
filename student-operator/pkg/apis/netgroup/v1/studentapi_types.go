@@ -29,6 +29,11 @@ type StudentAPISpec struct {
 	//student PublickKey
 	//+kubebuilder:validation:MinLength=1
 	PublicKey string `json:"publicKey"`
+
+	//user roles
+	//+kubebuilder:validation:MinLength=1
+	//+listType=set  
+	Roles []string `json:"roles"`
 }
 
 // StudentAPIStatus defines the observed state of StudentAPI

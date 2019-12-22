@@ -96,8 +96,27 @@ func schema_pkg_apis_netgroup_v1_StudentAPISpec(ref common.ReferenceCallback) co
 							Format:      "",
 						},
 					},
+					"roles": {
+						VendorExtensible: spec.VendorExtensible{
+							Extensions: spec.Extensions{
+								"x-kubernetes-list-type": "set",
+							},
+						},
+						SchemaProps: spec.SchemaProps{
+							Description: "user roles",
+							Type:        []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Type:   []string{"string"},
+										Format: "",
+									},
+								},
+							},
+						},
+					},
 				},
-				Required: []string{"id", "name", "surname", "publicKey"},
+				Required: []string{"id", "name", "surname", "publicKey", "roles"},
 			},
 		},
 	}
