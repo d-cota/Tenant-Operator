@@ -12,6 +12,7 @@ import (
 func GetOpenAPIDefinitions(ref common.ReferenceCallback) map[string]common.OpenAPIDefinition {
 	return map[string]common.OpenAPIDefinition{
 		"./pkg/apis/netgroup/v1.StudentAPI":       schema_pkg_apis_netgroup_v1_StudentAPI(ref),
+		"./pkg/apis/netgroup/v1.StudentAPIInfo":   schema_pkg_apis_netgroup_v1_StudentAPIInfo(ref),
 		"./pkg/apis/netgroup/v1.StudentAPISpec":   schema_pkg_apis_netgroup_v1_StudentAPISpec(ref),
 		"./pkg/apis/netgroup/v1.StudentAPIStatus": schema_pkg_apis_netgroup_v1_StudentAPIStatus(ref),
 	}
@@ -53,19 +54,24 @@ func schema_pkg_apis_netgroup_v1_StudentAPI(ref common.ReferenceCallback) common
 							Ref: ref("./pkg/apis/netgroup/v1.StudentAPIStatus"),
 						},
 					},
+					"info": {
+						SchemaProps: spec.SchemaProps{
+							Ref: ref("./pkg/apis/netgroup/v1.StudentAPIInfo"),
+						},
+					},
 				},
 			},
 		},
 		Dependencies: []string{
-			"./pkg/apis/netgroup/v1.StudentAPISpec", "./pkg/apis/netgroup/v1.StudentAPIStatus", "k8s.io/apimachinery/pkg/apis/meta/v1.ObjectMeta"},
+			"./pkg/apis/netgroup/v1.StudentAPIInfo", "./pkg/apis/netgroup/v1.StudentAPISpec", "./pkg/apis/netgroup/v1.StudentAPIStatus", "k8s.io/apimachinery/pkg/apis/meta/v1.ObjectMeta"},
 	}
 }
 
-func schema_pkg_apis_netgroup_v1_StudentAPISpec(ref common.ReferenceCallback) common.OpenAPIDefinition {
+func schema_pkg_apis_netgroup_v1_StudentAPIInfo(ref common.ReferenceCallback) common.OpenAPIDefinition {
 	return common.OpenAPIDefinition{
 		Schema: spec.Schema{
 			SchemaProps: spec.SchemaProps{
-				Description: "StudentAPISpec defines the desired state of StudentAPI",
+				Description: "StudentAPIInfo defines the general info of the user",
 				Type:        []string{"object"},
 				Properties: map[string]spec.Schema{
 					"id": {
@@ -122,14 +128,14 @@ func schema_pkg_apis_netgroup_v1_StudentAPISpec(ref common.ReferenceCallback) co
 	}
 }
 
-func schema_pkg_apis_netgroup_v1_StudentAPIStatus(ref common.ReferenceCallback) common.OpenAPIDefinition {
+func schema_pkg_apis_netgroup_v1_StudentAPISpec(ref common.ReferenceCallback) common.OpenAPIDefinition {
 	return common.OpenAPIDefinition{
 		Schema: spec.Schema{
 			SchemaProps: spec.SchemaProps{
-				Description: "StudentAPIStatus defines the observed state of StudentAPI",
+				Description: "StudentAPISpec defines the desired state of the object",
 				Type:        []string{"object"},
 				Properties: map[string]spec.Schema{
-					"nodes": {
+					"servers": {
 						VendorExtensible: spec.VendorExtensible{
 							Extensions: spec.Extensions{
 								"x-kubernetes-list-type": "set",
@@ -148,7 +154,37 @@ func schema_pkg_apis_netgroup_v1_StudentAPIStatus(ref common.ReferenceCallback) 
 						},
 					},
 				},
-				Required: []string{"nodes"},
+			},
+		},
+	}
+}
+
+func schema_pkg_apis_netgroup_v1_StudentAPIStatus(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "StudentAPIStatus defines the observed state of the object",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"servers": {
+						VendorExtensible: spec.VendorExtensible{
+							Extensions: spec.Extensions{
+								"x-kubernetes-list-type": "set",
+							},
+						},
+						SchemaProps: spec.SchemaProps{
+							Type: []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Type:   []string{"string"},
+										Format: "",
+									},
+								},
+							},
+						},
+					},
+				},
 			},
 		},
 	}

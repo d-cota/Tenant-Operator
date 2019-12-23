@@ -58,12 +58,20 @@ type Connection struct {
 	newUser    string
 }
 
+type Config struct {
+	Remoteuser string `yaml:"remote-user"`
+	Remoteport string `yaml:"remote-port"`
+	Remoteaddr string `yaml:"remote-addr"`
+	Roles 	   []string `yaml:"roles"`
+}
+
 const (
 	PRIVATE_KEY  string = "/home/davide/.ssh/id_rsa"
 	BASTION      string = "bastion"
 	BASTION_ADDR string = "130.192.225.74:22"
 	HOME         string = "/home/"
-	FINALIZER    string = "StudentFinalizer"
+	S_FINALIZER  string = "finalizers/student"
+	C_FINALIZER  string = "finalizers/cmap"
 )
 
 func EstablishConnection(remoteAddr string, remotePort string, remoteUser string) (*ssh.Session, error) {
@@ -167,7 +175,7 @@ func AddUser(c Connection) (err error) {
 		return
 	}
 
-	log.Info(fmt.Sprintf(b.String()))
+	log.V(1).Info(fmt.Sprintf(b.String()))
 	wg.Wait()
 
 	return nil
@@ -214,7 +222,8 @@ func DeleteUser(c Connection) (err error) {
 		return
 	}
 
-	log.Info(fmt.Sprintf(b.String()))
+	// log for debugging
+	log.V(1).Info(fmt.Sprintf(b.String()))
 
 	return nil
 
@@ -268,7 +277,6 @@ func add(mgr manager.Manager, rCreate reconcile.Reconciler, rDelete reconcile.Re
 	pred_create := predicate.Funcs{
 		CreateFunc: func(e event.CreateEvent) bool {
 			return true
-			//return false
 		},
 		DeleteFunc: func(e event.DeleteEvent) bool {
 			return false
@@ -334,7 +342,7 @@ func add(mgr manager.Manager, rCreate reconcile.Reconciler, rDelete reconcile.Re
 		UpdateFunc: func(e event.UpdateEvent) bool {
 			labels := e.MetaOld.GetLabels()
 			if val, ok := labels[kvp.key]; ok {
-				if val == kvp.value {
+				if val == kvp.value && e.MetaNew.GetDeletionTimestamp().IsZero() {
 				return true
 			}
 		}
@@ -370,7 +378,13 @@ func add(mgr manager.Manager, rCreate reconcile.Reconciler, rDelete reconcile.Re
 			return false
 		},
 		UpdateFunc: func(e event.UpdateEvent) bool {
-			return false
+			labels := e.MetaOld.GetLabels()
+			if val, ok := labels[kvp.key]; ok {
+				if val == kvp.value && !e.MetaNew.GetDeletionTimestamp().IsZero(){
+				return true
+			}
+		}
+		return false
 		},
 	}
 
@@ -426,14 +440,16 @@ func (r *ServerCreateReconcile) Reconcile (request reconcile.Request) (reconcile
 		return reconcile.Result{}, err
 	}
 
+	if !containsString(instance.Finalizers, C_FINALIZER) {
+		instance.Finalizers = append(instance.Finalizers, C_FINALIZER)
+		if err = r.client.Update(context.TODO(), instance); err != nil {
+			return reconcile.Result{}, err
+		}
+	}
+
 	yml := instance.Data["config"]
 
-    var config struct {
-		Remoteuser string `yaml:"remote-user"`
-		Remoteport string `yaml:"remote-port"`
-		Remoteaddr string `yaml:"remote-addr"`
-		Roles 	   []string `yaml:"roles"`
-	}
+	var config Config
 
 	if err = yaml.Unmarshal([]byte(yml), &config); err != nil {
 		log.Error(err,err.Error())
@@ -441,7 +457,6 @@ func (r *ServerCreateReconcile) Reconcile (request reconcile.Request) (reconcile
 
 	users := &netgroupv1.StudentAPIList{}
 	opts := []client.ListOption{
-		//client.MatchingFieldsSelector{Selector: fields.},
 		client.InNamespace(instance.Namespace),
 	}
 	err = r.client.List(context.TODO(), users, opts...)
@@ -452,29 +467,44 @@ func (r *ServerCreateReconcile) Reconcile (request reconcile.Request) (reconcile
 	// iterate over all objects
 	for _, user := range users.Items {
 		// iterate over roles of one object
-		for _, role := range user.Spec.Roles {
+		for _, role := range user.Info.Roles {
 			// if user role match with at least one of the server
 			// authorized role then AddUser()
 
+			if !containsString(user.Spec.Servers, config.Remoteaddr) {
+				user.Spec.Servers = append(user.Spec.Servers, config.Remoteaddr)
+				if err = r.client.Update(context.TODO(), &user); err != nil {
+					return reconcile.Result{}, err
+				}
+			}
+			
 			// iterate over ConfigMap roles
 			if containsString(config.Roles, role) {
+				
 				conn := Connection{
 					remoteAddr: config.Remoteaddr,
 					remoteUser: config.Remoteuser,
 					remotePort: config.Remoteport,
-					publicKey:  user.Spec.PublicKey,
-					newUser:    user.Spec.ID,
+					publicKey:  user.Info.PublicKey,
+					newUser:    user.Info.ID,
 				}
 
 				err = AddUser(conn)
 				if err != nil {
 					log.Error(err, err.Error())
-					// instead of return immediately try to set a label with "completed" and continue to add students
-					// maybe better on student add
+					// TODO no reconcile immediately, but not update status
+					
 					return reconcile.Result{RequeueAfter: time.Second * 20}, nil
 				}
 
-				log.Info(fmt.Sprintf("User %s added to %s",user.Spec.ID, config.Remoteaddr))
+				if !containsString(user.Status.Servers, config.Remoteaddr) {
+					user.Status.Servers = append(user.Status.Servers, config.Remoteaddr)
+					if err = r.client.Update(context.TODO(), &user); err != nil {
+						return reconcile.Result{}, err
+					}
+			    }
+
+				log.Info(fmt.Sprintf("User %s added to %s",user.Info.ID, config.Remoteaddr))
 				break
 			}
 		}
@@ -494,13 +524,83 @@ func (r *ServerDeleteReconcile) Reconcile (request reconcile.Request) (reconcile
 		return reconcile.Result{}, client.IgnoreNotFound(err)
 	}
 
-	log.Info("Deleted ConfigMap")
+	yml := instance.Data["config"]
+
+	var config Config
+
+	if err = yaml.Unmarshal([]byte(yml), &config); err != nil {
+		log.Error(err,err.Error())
+	}	
+
+	users := &netgroupv1.StudentAPIList{}
+
+	opts := []client.ListOption{
+		client.InNamespace(instance.Namespace),
+	}
+
+	err = r.client.List(context.TODO(), users, opts...)
+	if err != nil {
+		return reconcile.Result{}, err
+	}
+
+	// iterate over all objects
+	for _, user := range users.Items {
+		// iterate over roles of one object
+		for _, role := range user.Info.Roles {
+			// if user role match with at least one of the server
+			// authorized role then AddUser()
+
+			if containsString(user.Spec.Servers, config.Remoteaddr) {
+				user.Spec.Servers = removeString(user.Spec.Servers, config.Remoteaddr)
+				if err = r.client.Update(context.TODO(), &user); err != nil {
+					return reconcile.Result{}, err
+				}
+			}
+			
+			// iterate over ConfigMap roles
+			if containsString(config.Roles, role) {
+				conn := Connection{
+					remoteAddr: config.Remoteaddr,
+					remoteUser: config.Remoteuser,
+					remotePort: config.Remoteport,
+					publicKey:  user.Info.PublicKey,
+					newUser:    user.Info.ID,
+				}
+
+				err = DeleteUser(conn)
+				if err != nil {
+					log.Error(err, err.Error())
+					
+					return reconcile.Result{RequeueAfter: time.Second * 20}, nil
+				}
+
+				if containsString(user.Status.Servers, config.Remoteaddr) {
+					user.Status.Servers = removeString(user.Status.Servers, config.Remoteaddr)
+					if err = r.client.Update(context.TODO(), &user); err != nil {
+						return reconcile.Result{}, err
+					}
+				}
+				
+				log.Info(fmt.Sprintf("User account %s deleted from %s",user.Info.ID, config.Remoteaddr))
+				break
+			}
+		}
+	}
+
+	// looks for matching finalizers
+	if containsString(instance.Finalizers, C_FINALIZER) {
+		// remove our finalizer from the list and update it.
+		instance.Finalizers = removeString(instance.Finalizers, C_FINALIZER)
+		if err = r.client.Update(context.TODO(), instance); err != nil {
+			return reconcile.Result{}, err
+		}
+	}
 
 	return reconcile.Result{}, nil
 }
  
 // Reconcile reads that state of the cluster for a StudentAPI object and makes changes based on the state read
-// and what is in the StudentAPI.Spec
+// and what is in the StudentAPI.Info
 // The Controller will requeue the Request to be processed again if the returned error is non-nil or
 // Result.Requeue is true, otherwise upon completion it will remove the work from the queue.
 func (r *CreateReconcileStudentAPI) Reconcile(request reconcile.Request) (reconcile.Result, error) {
@@ -521,31 +621,29 @@ func (r *CreateReconcileStudentAPI) Reconcile(request reconcile.Request) (reconc
 	// The object is being created, so if it does not have our finalizer,
 	// then lets add the finalizer and update the object.
 	// This is equivalent to register the finalizer
-	if !containsString(instance.Finalizers, FINALIZER) {
-		instance.Finalizers = append(instance.Finalizers, FINALIZER)
+	if !containsString(instance.Finalizers, S_FINALIZER) {
+		instance.Finalizers = append(instance.Finalizers, S_FINALIZER)
 		if err = r.client.Update(context.TODO(), instance); err != nil {
 			return reconcile.Result{}, err
 		}
 	}
 
-	conn := Connection{
+	/*conn := Connection{
 		remoteAddr: "10.244.3.164",
 		remoteUser: "davide",
 		remotePort: "22",
-		publicKey:  instance.Spec.PublicKey,
-		newUser:    instance.Spec.ID,
+		publicKey:  instance.Info.PublicKey,
+		newUser:    instance.Info.ID,
 	}
 
 	err = AddUser(conn)
 	if err != nil {
-		/*
-		errLogger := log.WithValues("Error", err)
-		errLogger.Error(err, "Error")*/
+		
 		log.Error(err, err.Error())
 		return reconcile.Result{RequeueAfter: time.Second * 20}, nil
-	}
+	}*/
 
-	reqLogger := log.WithValues("Student ID", instance.Spec.ID)
+	reqLogger := log.WithValues("Student ID", instance.Info.ID)
 	reqLogger.Info("Created new student")
 
 	return reconcile.Result{}, nil
@@ -566,36 +664,36 @@ func (r *DeleteReconcileStudentAPI) Reconcile(request reconcile.Request) (reconc
 		remoteAddr: "10.244.3.164",
 		remoteUser: "davide",
 		remotePort: "22",
-		publicKey:  instance.Spec.PublicKey,
-		newUser:    instance.Spec.ID,
+		publicKey:  instance.Info.PublicKey,
+		newUser:    instance.Info.ID,
+	}
+		
+	if err = DeleteUser(conn); err != nil {
+		// if fail to delete the external dependency here, return with error
+		// so that it can be retried
+
+		// TODO distinguish error caused by a previous deletion,
+		// we return here due to finalizer update error - no reconcile again
+
+		return reconcile.Result{}, err
 	}
 
 	// look for matching finalizers
-	if containsString(instance.Finalizers, FINALIZER) {
-		// if requested finalizer is present, we will handle the
-		// deletion of external resource, i.e. a user account
-		if err = DeleteUser(conn); err != nil {
-			// if fail to delete the external dependency here, return with error
-			// so that it can be retried
-			return reconcile.Result{}, err
-		}
-
+	if containsString(instance.Finalizers, S_FINALIZER) {
 		// remove our finalizer from the list and update it.
-		instance.Finalizers = removeString(instance.Finalizers, FINALIZER)
+		instance.Finalizers = removeString(instance.Finalizers, S_FINALIZER)
 		if err = r.client.Update(context.TODO(), instance); err != nil {
 			return reconcile.Result{}, err
 		}
 	}
+		
 
-	reqLogger := log.WithValues("Student ID", instance.Spec.ID)
+	reqLogger := log.WithValues("Student ID", instance.Info.ID)
 	reqLogger.Info("Deleted student")
 
 	return reconcile.Result{}, nil
 }
 
-// TODO login on multiple machines (maybe watching the kubernetes label)
-// TODO add label on CR to distinguish accessible machines
-// TODO synchronize the access when a machine is created/deleted
 // TODO quanti utenti connessi
 // TODO handle all possible errors
 // TODO refactor with class
