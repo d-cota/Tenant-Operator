@@ -67,8 +67,8 @@ spec:
                 type: string
               type: array
           type: object
-        status:
-          description: StudentAPIStatus defines the observed state of the object
+        stat:
+          description: StudentAPIStat defines the observed state of the object
           properties:
             servers:
               items:

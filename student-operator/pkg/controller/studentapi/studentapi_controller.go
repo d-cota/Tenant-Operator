@@ -8,7 +8,7 @@ import (
 	"os"
 	"strings"
 	"sync"
-	"time"
+	//"time"
 	"io/ioutil"
 
 	netgroupv1 "github.com/example-inc/memcached-operator/pkg/apis/netgroup/v1"
@@ -28,7 +28,11 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/source"
 )
 
-var log = logf.Log.WithName("controller_studentapi")
+// TODO add var such kvp here
+var (
+	log = logf.Log.WithName("controller_studentapi")
+)
+
 
 // Helper functions to check and remove string from a slice of strings.
 func containsString(slice []string, s string) bool {
@@ -65,6 +69,7 @@ type Config struct {
 	Roles 	   []string `yaml:"roles"`
 }
 
+// TODO add const such as kvp, move this block up
 const (
 	PRIVATE_KEY  string = "/home/davide/.ssh/id_rsa"
 	BASTION      string = "bastion"
@@ -155,8 +160,8 @@ func AddUser(c Connection) (err error) {
 		return
 	}
 
-	wg := sync.WaitGroup{}
-	wg.Add(1)
+	wG := sync.WaitGroup{}
+	wG.Add(1)
 
 	go func() {
 		stdin, _ := session.StdinPipe()
@@ -164,7 +169,7 @@ func AddUser(c Connection) (err error) {
 		fmt.Fprintf(stdin, "C0664 %d %s\n", stat.Size(), c.newUser+".pub") // file name in the remote host, s263084.pub
 		io.Copy(stdin, file)
 		fmt.Fprint(stdin, "\x00")
-		wg.Done()
+		wG.Done()
 	}()
 
 	var b bytes.Buffer
@@ -176,7 +181,7 @@ func AddUser(c Connection) (err error) {
 	}
 
 	log.V(1).Info(fmt.Sprintf(b.String()))
-	wg.Wait()
+	wG.Wait()
 
 	return nil
 }
@@ -342,7 +347,7 @@ func add(mgr manager.Manager, rCreate reconcile.Reconciler, rDelete reconcile.Re
 		UpdateFunc: func(e event.UpdateEvent) bool {
 			labels := e.MetaOld.GetLabels()
 			if val, ok := labels[kvp.key]; ok {
-				if val == kvp.value && e.MetaNew.GetDeletionTimestamp().IsZero() {
+				if val == kvp.value && (len(e.MetaNew.GetFinalizers()) == len(e.MetaOld.GetFinalizers()) && e.MetaNew.GetDeletionTimestamp().IsZero()) {
 				return true
 			}
 		}
@@ -471,6 +476,7 @@ func (r *ServerCreateReconcile) Reconcile (request reconcile.Request) (reconcile
 			// if user role match with at least one of the server
 			// authorized role then AddUser()
 
+			// sets desired state of the object
 			if !containsString(user.Spec.Servers, config.Remoteaddr) {
 				user.Spec.Servers = append(user.Spec.Servers, config.Remoteaddr)
 				if err = r.client.Update(context.TODO(), &user); err != nil {
@@ -489,26 +495,32 @@ func (r *ServerCreateReconcile) Reconcile (request reconcile.Request) (reconcile
 					newUser:    user.Info.ID,
 				}
 
+			if !containsString(user.Stat.Servers, config.Remoteaddr) {
 				err = AddUser(conn)
 				if err != nil {
 					log.Error(err, err.Error())
 					// TODO no reconcile immediately, but not update status
 					
-					return reconcile.Result{RequeueAfter: time.Second * 20}, nil
-				}
-
-				if !containsString(user.Status.Servers, config.Remoteaddr) {
-					user.Status.Servers = append(user.Status.Servers, config.Remoteaddr)
+					//return reconcile.Result{RequeueAfter: time.Second * 20}, nil
+				} else {
+					// sets observed state of the user
+					user.Stat.Servers = append(user.Stat.Servers, config.Remoteaddr)
 					if err = r.client.Update(context.TODO(), &user); err != nil {
 						return reconcile.Result{}, err
 					}
 			    }
-
-				log.Info(fmt.Sprintf("User %s added to %s",user.Info.ID, config.Remoteaddr))
+			} else {
+				log.Info(fmt.Sprintf("User %s already present in %s",user.Info.ID, config.Remoteaddr))
 				break
+			}
+				
+			log.Info(fmt.Sprintf("User %s added to %s",user.Info.ID, config.Remoteaddr))
+			break
 			}
 		}
 	}
+
+	log.Info(fmt.Sprintf("Server at %s correctly created",config.Remoteaddr))
 
 	return reconcile.Result{}, nil
 }
@@ -547,8 +559,6 @@ func (r *ServerDeleteReconcile) Reconcile (request reconcile.Request) (reconcile
 	for _, user := range users.Items {
 		// iterate over roles of one object
 		for _, role := range user.Info.Roles {
-			// if user role match with at least one of the server
-			// authorized role then AddUser()
 
 			if containsString(user.Spec.Servers, config.Remoteaddr) {
 				user.Spec.Servers = removeString(user.Spec.Servers, config.Remoteaddr)
@@ -567,21 +577,26 @@ func (r *ServerDeleteReconcile) Reconcile (request reconcile.Request) (reconcile
 					newUser:    user.Info.ID,
 				}
 
-				err = DeleteUser(conn)
-				if err != nil {
-					log.Error(err, err.Error())
-					
-					return reconcile.Result{RequeueAfter: time.Second * 20}, nil
+				if containsString(user.Stat.Servers, config.Remoteaddr) {
+					err = DeleteUser(conn)
+					if err != nil {
+						log.Error(err, err.Error())
+						
+						// TODO not reconcile immediately
+						//return reconcile.Result{RequeueAfter: time.Second * 20}, nil
+					} else {
+						user.Stat.Servers = removeString(user.Stat.Servers, config.Remoteaddr)
+						if err = r.client.Update(context.TODO(), &user); err != nil {
+							return reconcile.Result{}, err
+						}
+					}
+
+				} else {
+					log.Info(fmt.Sprintf("User %s already deleted from %s",user.Info.ID, config.Remoteaddr))
+					break
 				}
 
-				if containsString(user.Status.Servers, config.Remoteaddr) {
-					user.Status.Servers = removeString(user.Status.Servers, config.Remoteaddr)
-					if err = r.client.Update(context.TODO(), &user); err != nil {
-						return reconcile.Result{}, err
-					}
-				}
-				
-				log.Info(fmt.Sprintf("User account %s deleted from %s",user.Info.ID, config.Remoteaddr))
+				log.Info(fmt.Sprintf("User %s deleted from %s",user.Info.ID, config.Remoteaddr))
 				break
 			}
 		}
@@ -595,6 +610,8 @@ func (r *ServerDeleteReconcile) Reconcile (request reconcile.Request) (reconcile
 			return reconcile.Result{}, err
 		}
 	}
+
+	log.Info(fmt.Sprintf("Server at %s correctly deleted",config.Remoteaddr))
 
 	return reconcile.Result{}, nil
 }
@@ -618,6 +635,7 @@ func (r *CreateReconcileStudentAPI) Reconcile(request reconcile.Request) (reconc
 		return reconcile.Result{}, err
 	}
 
+	
 	// The object is being created, so if it does not have our finalizer,
 	// then lets add the finalizer and update the object.
 	// This is equivalent to register the finalizer
@@ -628,23 +646,76 @@ func (r *CreateReconcileStudentAPI) Reconcile(request reconcile.Request) (reconc
 		}
 	}
 
-	/*conn := Connection{
-		remoteAddr: "10.244.3.164",
-		remoteUser: "davide",
-		remotePort: "22",
-		publicKey:  instance.Info.PublicKey,
-		newUser:    instance.Info.ID,
+	cmaps := &v1.ConfigMapList{}
+	opts := []client.ListOption{
+		client.InNamespace(instance.Namespace),
+		client.MatchingLabels(map[string] string {"use": "StudentAPI"}),
+	}
+	err = r.client.List(context.TODO(), cmaps, opts...)
+	if err != nil {
+		return reconcile.Result{}, err
 	}
 
-	err = AddUser(conn)
-	if err != nil {
-		
-		log.Error(err, err.Error())
-		return reconcile.Result{RequeueAfter: time.Second * 20}, nil
-	}*/
+	// iterate over all cmaps
+	for _, cmap := range cmaps.Items {
+		yml := cmap.Data["config"]
 
-	reqLogger := log.WithValues("Student ID", instance.Info.ID)
-	reqLogger.Info("Created new student")
+		var config Config
+
+		if err = yaml.Unmarshal([]byte(yml), &config); err != nil {
+			log.Error(err,err.Error())
+		}	
+
+		// iterate over roles of the user
+		for _, role := range instance.Info.Roles {
+			// if user role match with at least one of the server
+			// authorized roles then AddUser()
+
+			// sets desired state of the object
+			if !containsString(instance.Spec.Servers, config.Remoteaddr) {
+				instance.Spec.Servers = append(instance.Spec.Servers, config.Remoteaddr)
+				if err = r.client.Update(context.TODO(), instance); err != nil {
+					return reconcile.Result{}, err
+				}
+			}
+			
+			// iterate over ConfigMap roles
+			if containsString(config.Roles, role) {
+				conn := Connection{
+					remoteAddr: config.Remoteaddr,
+					remoteUser: config.Remoteuser,
+					remotePort: config.Remoteport,
+					publicKey:  instance.Info.PublicKey,
+					newUser:    instance.Info.ID,
+				}
+
+			if !containsString(instance.Stat.Servers, config.Remoteaddr) {
+				err = AddUser(conn)
+				if err != nil {
+					log.Error(err, err.Error())
+					// TODO no reconcile immediately, but not update status
+					
+					//return reconcile.Result{RequeueAfter: time.Second * 20}, nil
+				} else {
+					// sets observed state of the user
+					instance.Stat.Servers = append(instance.Stat.Servers, config.Remoteaddr)
+					if err = r.client.Update(context.TODO(), instance); err != nil {
+						return reconcile.Result{}, err
+					}
+			    }
+			} else {
+				log.Info(fmt.Sprintf("User %s already present in %s", instance.Info.ID, config.Remoteaddr))
+				break
+			}
+				
+			log.Info(fmt.Sprintf("User %s added to %s", instance.Info.ID, config.Remoteaddr))
+			break
+			}
+		}
+	}
+
+	reqLogger := log.WithValues("User ID", instance.Info.ID)
+	reqLogger.Info("Correctly created new user")
 
 	return reconcile.Result{}, nil
 }
@@ -660,22 +731,72 @@ func (r *DeleteReconcileStudentAPI) Reconcile(request reconcile.Request) (reconc
 		return reconcile.Result{}, client.IgnoreNotFound(err)
 	}
 
-	conn := Connection{
-		remoteAddr: "10.244.3.164",
-		remoteUser: "davide",
-		remotePort: "22",
-		publicKey:  instance.Info.PublicKey,
-		newUser:    instance.Info.ID,
+	cmaps := &v1.ConfigMapList{}
+	opts := []client.ListOption{
+		client.InNamespace(instance.Namespace),
+		client.MatchingLabels(map[string] string {"use": "StudentAPI"}),
 	}
-		
-	if err = DeleteUser(conn); err != nil {
-		// if fail to delete the external dependency here, return with error
-		// so that it can be retried
-
-		// TODO distinguish error caused by a previous deletion,
-		// we return here due to finalizer update error - no reconcile again
-
+	err = r.client.List(context.TODO(), cmaps, opts...)
+	if err != nil {
 		return reconcile.Result{}, err
+	}
+
+	// iterate over all cmaps
+	for _, cmap := range cmaps.Items {
+		yml := cmap.Data["config"]
+
+		var config Config
+
+		if err = yaml.Unmarshal([]byte(yml), &config); err != nil {
+			log.Error(err,err.Error())
+		}	
+
+		// iterate over roles of the user
+		for _, role := range instance.Info.Roles {
+			// if user role match with at least one of the server
+			// authorized roles then delete user from that machine
+
+			// sets desired state of the object
+			if containsString(instance.Spec.Servers, config.Remoteaddr) {
+				instance.Spec.Servers = removeString(instance.Spec.Servers, config.Remoteaddr)
+				if err = r.client.Update(context.TODO(), instance); err != nil {
+					return reconcile.Result{}, err
+				}
+			}
+			
+			// iterate over ConfigMap roles
+			if containsString(config.Roles, role) {
+				conn := Connection{
+					remoteAddr: config.Remoteaddr,
+					remoteUser: config.Remoteuser,
+					remotePort: config.Remoteport,
+					publicKey:  instance.Info.PublicKey,
+					newUser:    instance.Info.ID,
+				}
+
+			if containsString(instance.Stat.Servers, config.Remoteaddr) {
+				err = DeleteUser(conn)
+				if err != nil {
+					log.Error(err, err.Error())
+					// TODO no reconcile immediately, but not update status
+					
+					//return reconcile.Result{RequeueAfter: time.Second * 20}, nil
+				} else {
+					// sets observed state of the user
+					instance.Stat.Servers = removeString(instance.Stat.Servers, config.Remoteaddr)
+					if err = r.client.Update(context.TODO(), instance); err != nil {
+						return reconcile.Result{}, err
+					}
+			    }
+			} else {
+				log.Info(fmt.Sprintf("User %s already deleted from %s", instance.Info.ID, config.Remoteaddr))
+				break
+			}
+				
+			log.Info(fmt.Sprintf("User %s deleted from %s", instance.Info.ID, config.Remoteaddr))
+			break
+			}
+		}
 	}
 
 	// look for matching finalizers
@@ -689,13 +810,14 @@ func (r *DeleteReconcileStudentAPI) Reconcile(request reconcile.Request) (reconc
 		
 
 	reqLogger := log.WithValues("Student ID", instance.Info.ID)
-	reqLogger.Info("Deleted student")
+	reqLogger.Info("Correctly deleted user")
 
 	return reconcile.Result{}, nil
 }
 
+// TODO gestione concorrenza
 // TODO quanti utenti connessi
 // TODO handle all possible errors
 // TODO refactor with class
 // TODO add name and surname when registering
-// TODO use Spec and Status to see the running users
+// TODO use Spec and Stat to see the running users

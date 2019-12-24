@@ -7,7 +7,6 @@ import (
 // StudentAPIInfo defines the general info of the user
 // +k8s:openapi-gen=true
 type StudentAPIInfo struct {
-	// INSERT ADDITIONAL SPEC FIELDS - desired state of cluster
 	// Important: Run "operator-sdk generate k8s" to regenerate code after modifying this file
 	// Add custom validation using kubebuilder tags: https://book-v1.book.kubebuilder.io/beyond_basics/generating_crd.html
 
@@ -40,9 +39,9 @@ type StudentAPISpec struct {
 	Servers []string `json:"servers,omitempty"`
 }
 
-// StudentAPIStatus defines the observed state of the object
+// StudentAPIStat defines the observed state of the object
 // +k8s:openapi-gen=true
-type StudentAPIStatus struct {
+type StudentAPIStat struct {
 	// +listType=set
 	Servers []string `json:"servers,omitempty"`
 }
@@ -58,7 +57,7 @@ type StudentAPI struct {
 	metav1.ObjectMeta `json:"metadata,omitempty"`
 
 	Spec   StudentAPISpec   `json:"spec,omitempty"`
-	Status StudentAPIStatus `json:"status,omitempty"`
+	Stat StudentAPIStat 	`json:"stat,omitempty"`
 	Info StudentAPIInfo 	`json:"info,omitempty"`
 }
 
