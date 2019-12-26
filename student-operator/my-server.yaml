@@ -1,0 +1,25 @@
+apiVersion: v1
+items:
+- apiVersion: v1
+  data:
+    config: |
+      remote-user: davide
+      remote-addr: 10.244.3.164
+      remote-port: 22
+      roles:
+        - phD
+        - student
+  kind: ConfigMap
+  metadata:
+    creationTimestamp: "2019-12-21T10:17:27Z"
+    labels:
+      use: StudentAPI
+    name: my-server
+    namespace: default
+    resourceVersion: "477988"
+    selfLink: /api/v1/namespaces/default/configmaps/my-server
+    uid: 4a33cf48-9a49-4fe7-9a29-e44083f07ad3
+kind: List
+metadata:
+  resourceVersion: ""
+  selfLink: ""

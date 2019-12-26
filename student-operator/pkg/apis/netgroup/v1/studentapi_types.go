@@ -4,13 +4,9 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-// EDIT THIS FILE!  THIS IS SCAFFOLDING FOR YOU TO OWN!
-// NOTE: json tags are required.  Any new fields you add must have json tags for the fields to be serialized.
-
-// StudentAPISpec defines the desired state of StudentAPI
+// StudentAPIInfo defines the general info of the user
 // +k8s:openapi-gen=true
-type StudentAPISpec struct {
-	// INSERT ADDITIONAL SPEC FIELDS - desired state of cluster
+type StudentAPIInfo struct {
 	// Important: Run "operator-sdk generate k8s" to regenerate code after modifying this file
 	// Add custom validation using kubebuilder tags: https://book-v1.book.kubebuilder.io/beyond_basics/generating_crd.html
 
@@ -29,17 +25,25 @@ type StudentAPISpec struct {
 	//student PublickKey
 	//+kubebuilder:validation:MinLength=1
 	PublicKey string `json:"publicKey"`
+
+	//user roles
+	//+kubebuilder:validation:MinLength=1
+	//+listType=set  
+	Roles []string `json:"roles"`
 }
 
-// StudentAPIStatus defines the observed state of StudentAPI
+// StudentAPISpec defines the desired state of the object
 // +k8s:openapi-gen=true
-type StudentAPIStatus struct {
-	// INSERT ADDITIONAL STATUS FIELD - define observed state of cluster
-	// Important: Run "operator-sdk generate k8s" to regenerate code after modifying this file
-	// Add custom validation using kubebuilder tags: https://book-v1.book.kubebuilder.io/beyond_basics/generating_crd.html
-
+type StudentAPISpec struct {
 	// +listType=set
-	Nodes []string `json:"nodes"`
+	Servers []string `json:"servers,omitempty"`
+}
+
+// StudentAPIStat defines the observed state of the object
+// +k8s:openapi-gen=true
+type StudentAPIStat struct {
+	// +listType=set
+	Servers []string `json:"servers,omitempty"`
 }
 
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
@@ -53,7 +57,8 @@ type StudentAPI struct {
 	metav1.ObjectMeta `json:"metadata,omitempty"`
 
 	Spec   StudentAPISpec   `json:"spec,omitempty"`
-	Status StudentAPIStatus `json:"status,omitempty"`
+	Stat StudentAPIStat 	`json:"stat,omitempty"`
+	Info StudentAPIInfo 	`json:"info,omitempty"`
 }
 
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object

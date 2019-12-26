@@ -1,0 +1,6 @@
+remote-user: davide
+remote-addr: 10.244.3.164
+remote-port: 22
+roles :
+  - phD
+  - student

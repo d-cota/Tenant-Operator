@@ -21,15 +21,8 @@ spec:
             of an object. Servers should convert recognized schemas to the latest
             internal value, and may reject unrecognized values. More info: https://git.k8s.io/community/contributors/devel/api-conventions.md#resources'
           type: string
-        kind:
-          description: 'Kind is a string value representing the REST resource this
-            object represents. Servers may infer this from the endpoint the client
-            submits requests to. Cannot be updated. In CamelCase. More info: https://git.k8s.io/community/contributors/devel/api-conventions.md#types-kinds'
-          type: string
-        metadata:
-          type: object
-        spec:
-          description: StudentAPISpec defines the desired state of StudentAPI
+        info:
+          description: StudentAPIInfo defines the general info of the user
           properties:
             id:
               description: student id
@@ -43,6 +36,11 @@ spec:
               description: student PublickKey
               minLength: 1
               type: string
+            roles:
+              description: user roles
+              items:
+                type: string
+              type: array
             surname:
               description: student surname
               minLength: 1
@@ -51,17 +49,31 @@ spec:
           - id
           - name
           - publicKey
+          - roles
           - surname
           type: object
-        status:
-          description: StudentAPIStatus defines the observed state of StudentAPI
+        kind:
+          description: 'Kind is a string value representing the REST resource this
+            object represents. Servers may infer this from the endpoint the client
+            submits requests to. Cannot be updated. In CamelCase. More info: https://git.k8s.io/community/contributors/devel/api-conventions.md#types-kinds'
+          type: string
+        metadata:
+          type: object
+        spec:
+          description: StudentAPISpec defines the desired state of the object
           properties:
-            nodes:
+            servers:
               items:
                 type: string
               type: array
-          required:
-          - nodes
+          type: object
+        stat:
+          description: StudentAPIStat defines the observed state of the object
+          properties:
+            servers:
+              items:
+                type: string
+              type: array
           type: object
       type: object
   version: v1
