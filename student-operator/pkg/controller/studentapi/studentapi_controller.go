@@ -29,13 +29,10 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/source"
 )
 
-// TODO add var such kvp here
-var (
-	c_log = logf.Log.WithName("controller_create_studentapi")
-	d_log = logf.Log.WithName("controller_delete_studentapi")
-	cm_log = logf.Log.WithName("controller_create_server")
-	dm_log = logf.Log.WithName("controller_delete_server")
-)
+type keyValuePair struct {
+	key   string
+	value string
+}
 
 type Connection struct {
 	remoteAddr string
@@ -45,12 +42,22 @@ type Connection struct {
 	newUser    string
 }
 
+// TODO reuse Connection inside
 type Config struct {
 	Remoteuser string `yaml:"remote-user"`
 	Remoteport string `yaml:"remote-port"`
 	Remoteaddr string `yaml:"remote-addr"`
 	Roles 	   []string `yaml:"roles"`
 }
+
+// TODO add other vars
+var (
+	c_log = logf.Log.WithName("controller_create_studentapi")
+	d_log = logf.Log.WithName("controller_delete_studentapi")
+	cm_log = logf.Log.WithName("controller_create_server")
+	dm_log = logf.Log.WithName("controller_delete_server")
+	kvp keyValuePair
+)
 
 // TODO add const such as kvp
 const (
@@ -239,13 +246,6 @@ func DeleteUser(c Connection, log logr.Logger) (err error) {
 	return nil
 
 }
-
-type keyValuePair struct {
-	key   string
-	value string
-}
-
-var kvp keyValuePair
 
 // Add creates two new StudentAPI Controllers and adds them to the Manager. The Manager will set fields on the Controller
 // and Start it when the Manager is Started.
