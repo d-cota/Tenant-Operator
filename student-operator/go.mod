@@ -4,6 +4,7 @@ go 1.13
 
 require (
 	github.com/bramvdbogaerde/go-scp v0.0.0-20191005185035-c96fe084709e // indirect
+	github.com/go-logr/logr v0.1.0
 	github.com/go-openapi/spec v0.19.0
 	github.com/goccy/go-yaml v1.1.5
 	github.com/mattn/go-isatty v0.0.11 // indirect
@@ -12,7 +13,7 @@ require (
 	golang.org/x/crypto v0.0.0-20190621222207-cc06ce4a13d4
 	golang.org/x/sys v0.0.0-20191220220014-0732a990476f // indirect
 	golang.org/x/xerrors v0.0.0-20191204190536-9bdfabe68543 // indirect
-	gopkg.in/yaml.v2 v2.2.7
+	gopkg.in/yaml.v2 v2.2.7 // indirect
 	k8s.io/api v0.0.0
 	k8s.io/apimachinery v0.0.0
 	k8s.io/client-go v11.0.0+incompatible

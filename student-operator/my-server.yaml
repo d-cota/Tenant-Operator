@@ -15,7 +15,7 @@ items:
     labels:
       use: StudentAPI
     name: my-server
-    namespace: default
+    namespace: dcota-ns1
     resourceVersion: "477988"
     selfLink: /api/v1/namespaces/default/configmaps/my-server
     uid: 4a33cf48-9a49-4fe7-9a29-e44083f07ad3

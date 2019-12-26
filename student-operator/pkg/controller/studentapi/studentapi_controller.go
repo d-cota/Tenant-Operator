@@ -22,6 +22,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
+	"github.com/go-logr/logr"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
@@ -30,9 +31,36 @@ import (
 
 // TODO add var such kvp here
 var (
-	log = logf.Log.WithName("controller_studentapi")
+	c_log = logf.Log.WithName("controller_create_studentapi")
+	d_log = logf.Log.WithName("controller_delete_studentapi")
+	cm_log = logf.Log.WithName("controller_create_server")
+	dm_log = logf.Log.WithName("controller_delete_server")
 )
 
+type Connection struct {
+	remoteAddr string
+	remotePort string
+	remoteUser string
+	publicKey  string
+	newUser    string
+}
+
+type Config struct {
+	Remoteuser string `yaml:"remote-user"`
+	Remoteport string `yaml:"remote-port"`
+	Remoteaddr string `yaml:"remote-addr"`
+	Roles 	   []string `yaml:"roles"`
+}
+
+// TODO add const such as kvp
+const (
+	PRIVATE_KEY  string = "/etc/secret-volume/ssh-privatekey"
+	BASTION      string = "bastion"
+	BASTION_ADDR string = "130.192.225.74:22"
+	HOME         string = "/home/"
+	S_FINALIZER  string = "finalizers/student"
+	C_FINALIZER  string = "finalizers/cmap"
+)
 
 // Helper functions to check and remove string from a slice of strings.
 func containsString(slice []string, s string) bool {
@@ -53,31 +81,6 @@ func removeString(slice []string, s string) (result []string) {
 	}
 	return
 }
-
-type Connection struct {
-	remoteAddr string
-	remotePort string
-	remoteUser string
-	publicKey  string
-	newUser    string
-}
-
-type Config struct {
-	Remoteuser string `yaml:"remote-user"`
-	Remoteport string `yaml:"remote-port"`
-	Remoteaddr string `yaml:"remote-addr"`
-	Roles 	   []string `yaml:"roles"`
-}
-
-// TODO add const such as kvp, move this block up
-const (
-	PRIVATE_KEY  string = "/home/davide/.ssh/id_rsa"
-	BASTION      string = "bastion"
-	BASTION_ADDR string = "130.192.225.74:22"
-	HOME         string = "/home/"
-	S_FINALIZER  string = "finalizers/student"
-	C_FINALIZER  string = "finalizers/cmap"
-)
 
 func EstablishConnection(remoteAddr string, remotePort string, remoteUser string) (*ssh.Session, error) {
 	key, err := ioutil.ReadFile(PRIVATE_KEY) // path to bastion private key authentication
@@ -128,7 +131,7 @@ func EstablishConnection(remoteAddr string, remotePort string, remoteUser string
 }
 
 // this function connects to the remote machine and creates a new user named with his studentID
-func AddUser(c Connection) (err error) {
+func AddUser(c Connection, log logr.Logger) (err error) {
 
 	session, err := EstablishConnection(c.remoteAddr, c.remotePort, c.remoteUser)
 	if err != nil {
@@ -136,19 +139,21 @@ func AddUser(c Connection) (err error) {
 	}
 	defer session.Close()
 
-	file, err := os.Create(c.newUser) //filename
+	keyPath := "/tmp/" + c.newUser + ".pub" // where to write user key in pod
+
+	file, err := os.Create(keyPath) //filename
 	if err != nil {
 		return
 	}
 
 	_, err = io.Copy(file, strings.NewReader(c.publicKey))
 	if err != nil {
-		return nil, err
+		return 
 	}
 
 	file.Close()
 
-	file, err = os.Open(c.newUser)
+	file, err = os.Open(keyPath)
 	if err != nil {
 		return
 	}
@@ -175,7 +180,7 @@ func AddUser(c Connection) (err error) {
 
 	var b bytes.Buffer
 	session.Stdout = &b
-	keyPath := HOME + c.remoteUser                                             // where to copy the publicKey in the remote server
+	keyPath = HOME + c.remoteUser                                             // where to copy the publicKey in the remote server
 	cmd := "/usr/bin/scp -t " + keyPath + ";sudo ./addstudent.sh " + c.newUser // scp copies pKey in remote server, addstudent.sh copies it in new user
 	if err = session.Run(cmd); err != nil {
 		return
@@ -187,7 +192,7 @@ func AddUser(c Connection) (err error) {
 	return nil
 }
 
-func DeleteUser(c Connection) (err error) {
+func DeleteUser(c Connection, log logr.Logger) (err error) {
 
 	session, err := EstablishConnection(c.remoteAddr, c.remotePort, c.remoteUser)
 	if err != nil {
@@ -199,35 +204,6 @@ func DeleteUser(c Connection) (err error) {
 	stdin, err := session.StdinPipe()
 	if err != nil {
 		return 
-	}
-
-	defer file.Close()
-
-	stat, err := file.Stat()
-	if err != nil {
-		return 
-	}
-
-	wg := sync.WaitGroup{}
-	wg.Add(1)
-
-	
-	go func() {
-	hostIn, _ := session.StdinPipe()
-	defer hostIn.Close()
-	fmt.Fprintf(hostIn, "C0664 %d %s\n", stat.Size(), c.newUser + ".pub") // file name in the remote host, s263084.pub
-	io.Copy(hostIn, file)
-	fmt.Fprint(hostIn, "\x00")
-	wg.Done()
-	}()
-	
-
-	var b bytes.Buffer
-	session.Stdout = &b
-	keyPath = HOME + c.remoteUser                                         // where to copy the publicKey in the remote server
-	cmd := "/usr/bin/scp -t " + keyPath + ";sudo ./addstudent.sh " + c.newUser // scp copies pKey in remote server, addstudent.sh copies it in new user
-	if err = session.Run(cmd); err != nil {
-		return
 	}
 
 	err = session.Shell()
@@ -487,7 +463,7 @@ func (r *ServerCreateReconcile) Reconcile (request reconcile.Request) (reconcile
 	var config Config
 
 	if err = yaml.Unmarshal([]byte(yml), &config); err != nil {
-		log.Error(err,err.Error())
+		cm_log.Error(err,err.Error())
 	}	
 
 	users := &netgroupv1.StudentAPIList{}
@@ -526,9 +502,9 @@ func (r *ServerCreateReconcile) Reconcile (request reconcile.Request) (reconcile
 				}
 
 			if !containsString(user.Stat.Servers, config.Remoteaddr) {
-				err = AddUser(conn)
+				err = AddUser(conn, cm_log)
 				if err != nil {
-					log.Error(err, err.Error())
+					cm_log.Error(err, err.Error())
 					// TODO no reconcile immediately, but not update status
 					
 					//return reconcile.Result{RequeueAfter: time.Second * 20}, nil
@@ -540,17 +516,17 @@ func (r *ServerCreateReconcile) Reconcile (request reconcile.Request) (reconcile
 					}
 			    }
 			} else {
-				log.Info(fmt.Sprintf("User %s already present in %s",user.Info.ID, config.Remoteaddr))
+				cm_log.Info(fmt.Sprintf("User %s already present in %s",user.Info.ID, config.Remoteaddr))
 				break
 			}
 				
-			log.Info(fmt.Sprintf("User %s added to %s",user.Info.ID, config.Remoteaddr))
+			cm_log.Info(fmt.Sprintf("User %s added to %s",user.Info.ID, config.Remoteaddr))
 			break
 			}
 		}
 	}
 
-	log.Info(fmt.Sprintf("Server at %s correctly created",config.Remoteaddr))
+	cm_log.Info(fmt.Sprintf("Server at %s correctly created",config.Remoteaddr))
 
 	return reconcile.Result{}, nil
 }
@@ -571,7 +547,7 @@ func (r *ServerDeleteReconcile) Reconcile (request reconcile.Request) (reconcile
 	var config Config
 
 	if err = yaml.Unmarshal([]byte(yml), &config); err != nil {
-		log.Error(err,err.Error())
+		d_log.Error(err,err.Error())
 	}	
 
 	users := &netgroupv1.StudentAPIList{}
@@ -608,9 +584,9 @@ func (r *ServerDeleteReconcile) Reconcile (request reconcile.Request) (reconcile
 				}
 
 				if containsString(user.Stat.Servers, config.Remoteaddr) {
-					err = DeleteUser(conn)
+					err = DeleteUser(conn, dm_log)
 					if err != nil {
-						log.Error(err, err.Error())
+						dm_log.Error(err, err.Error())
 						
 						// TODO not reconcile immediately
 						//return reconcile.Result{RequeueAfter: time.Second * 20}, nil
@@ -622,11 +598,11 @@ func (r *ServerDeleteReconcile) Reconcile (request reconcile.Request) (reconcile
 					}
 
 				} else {
-					log.Info(fmt.Sprintf("User %s already deleted from %s",user.Info.ID, config.Remoteaddr))
+					dm_log.Info(fmt.Sprintf("User %s already deleted from %s",user.Info.ID, config.Remoteaddr))
 					break
 				}
 
-				log.Info(fmt.Sprintf("User %s deleted from %s",user.Info.ID, config.Remoteaddr))
+				dm_log.Info(fmt.Sprintf("User %s deleted from %s",user.Info.ID, config.Remoteaddr))
 				break
 			}
 		}
@@ -641,7 +617,7 @@ func (r *ServerDeleteReconcile) Reconcile (request reconcile.Request) (reconcile
 		}
 	}
 
-	log.Info(fmt.Sprintf("Server at %s correctly deleted",config.Remoteaddr))
+	dm_log.Info(fmt.Sprintf("Server at %s correctly deleted",config.Remoteaddr))
 
 	return reconcile.Result{}, nil
 }
@@ -693,7 +669,7 @@ func (r *CreateReconcileStudentAPI) Reconcile(request reconcile.Request) (reconc
 		var config Config
 
 		if err = yaml.Unmarshal([]byte(yml), &config); err != nil {
-			log.Error(err,err.Error())
+			c_log.Error(err,err.Error())
 		}	
 
 		// iterate over roles of the user
@@ -720,9 +696,9 @@ func (r *CreateReconcileStudentAPI) Reconcile(request reconcile.Request) (reconc
 				}
 
 			if !containsString(instance.Stat.Servers, config.Remoteaddr) {
-				err = AddUser(conn)
+				err = AddUser(conn, c_log)
 				if err != nil {
-					log.Error(err, err.Error())
+					c_log.Error(err, err.Error())
 					// TODO no reconcile immediately, but not update status
 					
 					//return reconcile.Result{RequeueAfter: time.Second * 20}, nil
@@ -734,17 +710,17 @@ func (r *CreateReconcileStudentAPI) Reconcile(request reconcile.Request) (reconc
 					}
 			    }
 			} else {
-				log.Info(fmt.Sprintf("User %s already present in %s", instance.Info.ID, config.Remoteaddr))
+				c_log.Info(fmt.Sprintf("User %s already present in %s", instance.Info.ID, config.Remoteaddr))
 				break
 			}
 				
-			log.Info(fmt.Sprintf("User %s added to %s", instance.Info.ID, config.Remoteaddr))
+			c_log.Info(fmt.Sprintf("User %s added to %s", instance.Info.ID, config.Remoteaddr))
 			break
 			}
 		}
 	}
 
-	reqLogger := log.WithValues("User ID", instance.Info.ID)
+	reqLogger := c_log.WithValues("User ID", instance.Info.ID)
 	reqLogger.Info("Correctly created new user")
 
 	return reconcile.Result{}, nil
@@ -778,7 +754,7 @@ func (r *DeleteReconcileStudentAPI) Reconcile(request reconcile.Request) (reconc
 		var config Config
 
 		if err = yaml.Unmarshal([]byte(yml), &config); err != nil {
-			log.Error(err,err.Error())
+			d_log.Error(err,err.Error())
 		}	
 
 		// iterate over roles of the user
@@ -805,9 +781,9 @@ func (r *DeleteReconcileStudentAPI) Reconcile(request reconcile.Request) (reconc
 				}
 
 			if containsString(instance.Stat.Servers, config.Remoteaddr) {
-				err = DeleteUser(conn)
+				err = DeleteUser(conn, d_log)
 				if err != nil {
-					log.Error(err, err.Error())
+					d_log.Error(err, err.Error())
 					// TODO no reconcile immediately, but not update status
 					
 					//return reconcile.Result{RequeueAfter: time.Second * 20}, nil
@@ -819,11 +795,11 @@ func (r *DeleteReconcileStudentAPI) Reconcile(request reconcile.Request) (reconc
 					}
 			    }
 			} else {
-				log.Info(fmt.Sprintf("User %s already deleted from %s", instance.Info.ID, config.Remoteaddr))
+				d_log.Info(fmt.Sprintf("User %s already deleted from %s", instance.Info.ID, config.Remoteaddr))
 				break
 			}
 				
-			log.Info(fmt.Sprintf("User %s deleted from %s", instance.Info.ID, config.Remoteaddr))
+			d_log.Info(fmt.Sprintf("User %s deleted from %s", instance.Info.ID, config.Remoteaddr))
 			break
 			}
 		}
@@ -839,7 +815,7 @@ func (r *DeleteReconcileStudentAPI) Reconcile(request reconcile.Request) (reconc
 	}
 		
 
-	reqLogger := log.WithValues("Student ID", instance.Info.ID)
+	reqLogger := d_log.WithValues("Student ID", instance.Info.ID)
 	reqLogger.Info("Correctly deleted user")
 
 	return reconcile.Result{}, nil
