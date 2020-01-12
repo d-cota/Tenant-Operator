@@ -24,6 +24,14 @@ spec:
         info:
           description: StudentAPIInfo defines the general info of the user
           properties:
+            email:
+              description: student email
+              minLength: 1
+              type: string
+            group:
+              description: student group
+              minLength: 1
+              type: string
             id:
               description: student id
               minLength: 1
@@ -46,6 +54,7 @@ spec:
               minLength: 1
               type: string
           required:
+          - email
           - id
           - name
           - publicKey

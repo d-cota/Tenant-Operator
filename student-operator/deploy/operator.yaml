@@ -20,7 +20,7 @@ spec:
       containers:
         - name: student-operator
           # Replace this with the built image name
-          image: docker.io/dcota1/student-operator:v1.4
+          image: docker.io/dcota1/student-operator:v1.7
           volumeMounts:
           - name: secret-volume
             readOnly: true

@@ -95,6 +95,20 @@ func schema_pkg_apis_netgroup_v1_StudentAPIInfo(ref common.ReferenceCallback) co
 							Format:      "",
 						},
 					},
+					"email": {
+						SchemaProps: spec.SchemaProps{
+							Description: "student email",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"group": {
+						SchemaProps: spec.SchemaProps{
+							Description: "student group",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
 					"publicKey": {
 						SchemaProps: spec.SchemaProps{
 							Description: "student PublickKey",
@@ -122,7 +136,7 @@ func schema_pkg_apis_netgroup_v1_StudentAPIInfo(ref common.ReferenceCallback) co
 						},
 					},
 				},
-				Required: []string{"id", "name", "surname", "publicKey", "roles"},
+				Required: []string{"id", "name", "surname", "email", "publicKey", "roles"},
 			},
 		},
 	}

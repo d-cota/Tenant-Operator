@@ -25,6 +25,7 @@ import (
 	"github.com/spf13/pflag"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
+	//"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client/config"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
@@ -90,6 +91,14 @@ func main() {
 		os.Exit(1)
 	}
 
+	/*namespaces := []string{"dcota-ns1", "dpallotta-ns1"}
+
+	// Create a new Cmd to provide shared dependencies and start components
+	mgr, err := manager.New(cfg, manager.Options{
+		NewCache:           cache.MultiNamespacedCacheBuilder(namespaces),
+		MapperProvider:     restmapper.NewDynamicRESTMapper,
+		MetricsBindAddress: fmt.Sprintf("%s:%d", metricsHost, metricsPort),
+	})*/
 	// Create a new Cmd to provide shared dependencies and start components
 	mgr, err := manager.New(cfg, manager.Options{
 		Namespace:          namespace,
@@ -102,10 +111,6 @@ func main() {
 	}
 
 	log.Info("Registering Components.")
-
-	/*machines := os.Getenv("SERVERS")
-	newLogger := log.WithValues("machines",machines)
-	newLogger.Info(machines, "machines")*/
 
 	// Setup Scheme for all resources
 	if err := apis.AddToScheme(mgr.GetScheme()); err != nil {

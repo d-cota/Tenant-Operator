@@ -22,6 +22,14 @@ type StudentAPIInfo struct {
 	//+kubebuilder:validation:MinLength=1
 	Surname string `json:"surname"`
 
+	//student email
+	//+kubebuilder:validation:MinLength=1
+	Email string `json:"email"`
+
+	//student group
+	//+kubebuilder:validation:MinLength=1
+	Group string `json:"group,omitempty"`
+
 	//student PublickKey
 	//+kubebuilder:validation:MinLength=1
 	PublicKey string `json:"publicKey"`
@@ -56,7 +64,7 @@ type StudentAPI struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
 
-	Spec   StudentAPISpec   `json:"spec,omitempty"`
+	Spec StudentAPISpec     `json:"spec,omitempty"`
 	Stat StudentAPIStat 	`json:"stat,omitempty"`
 	Info StudentAPIInfo 	`json:"info,omitempty"`
 }

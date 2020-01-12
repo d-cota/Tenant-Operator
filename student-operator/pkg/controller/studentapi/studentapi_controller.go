@@ -8,8 +8,10 @@ import (
 	"os"
 	"strings"
 	"sync"
-	//"time"
+	"time"
 	"io/ioutil"
+	"os/exec"
+	"net/smtp"
 
 	netgroupv1 "github.com/example-inc/memcached-operator/pkg/apis/netgroup/v1"
 	"k8s.io/api/core/v1"
@@ -17,6 +19,7 @@ import (
 	"github.com/goccy/go-yaml"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
+	t "k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/event"
@@ -245,6 +248,59 @@ func DeleteUser(c Connection, log logr.Logger) (err error) {
 
 	return nil
 
+}
+
+func sendEmail(to string) (err error){
+	// Choose auth method and set it up
+	auth := smtp.PlainAuth("", "coursecloudcomputing@gmail.com", "verysecretpass", "smtp.gmail.com")
+
+	// Here we do it all: connect to our server, set up a message and send it
+	msg := "From: coursecloudcomputing@gmail.com\n" +
+			"To:" + to + "\n" +
+			"Subject: Welcome to the Cloud Computing Lab\r\n" +
+			"\r\n" +
+			"Hi, you're just been added to some machines. Enjoy!\r\n"
+	err = smtp.SendMail("smtp.gmail.com:587", auth,"coursecloudcomputing@gmail.com", []string{to} , []byte(msg))
+	if err != nil {
+		return 
+	}
+	return nil
+}
+
+func GenerateVPNCert(user string, pod_name string, service_ip string) (err error) {
+	cmd := exec.Command("./root/kubectl", "exec", "-it", pod_name, "-c", "openvpn", "/etc/openvpn/setup/newClientCert.sh", user, service_ip)
+	_, err = cmd.Output()
+	if err != nil {
+		return
+	}
+
+	cmd = exec.Command("./root/kubectl", "exec", "-it", pod_name, "-c", "openvpn", "cat", "/etc/openvpn/certs/pki/" + user + ".ovpn")
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	err = cmd.Run()
+	if err != nil {
+		c_log.Info(fmt.Sprintf("%s: %s",err, stderr.String()))
+		return
+	}
+
+	file, err := os.Create("/root/" + user + ".ovpn") 
+	if err != nil {
+		return
+	}
+	_, err = io.Copy(file, strings.NewReader(stdout.String()))
+	if err != nil {
+		return 
+	}
+
+	file.Close()
+
+	cmd = exec.Command("./root/kubectl", "create", "secret", "generic", user + ".ovpn", "--from-file=/root/" + user + ".ovpn")
+	err = cmd.Run()
+	if err != nil {
+		return
+	}
+
+	return nil
 }
 
 // Add creates two new StudentAPI Controllers and adds them to the Manager. The Manager will set fields on the Controller
@@ -481,17 +537,16 @@ func (r *ServerCreateReconcile) Reconcile (request reconcile.Request) (reconcile
 		for _, role := range user.Info.Roles {
 			// if user role match with at least one of the server
 			// authorized role then AddUser()
-
-			// sets desired state of the object
-			if !containsString(user.Spec.Servers, config.Remoteaddr) {
-				user.Spec.Servers = append(user.Spec.Servers, config.Remoteaddr)
-				if err = r.client.Update(context.TODO(), &user); err != nil {
-					return reconcile.Result{}, err
-				}
-			}
 			
 			// iterate over ConfigMap roles
 			if containsString(config.Roles, role) {
+				// sets desired state of the object
+				if !containsString(user.Spec.Servers, config.Remoteaddr) {
+					user.Spec.Servers = append(user.Spec.Servers, config.Remoteaddr)
+					if err = r.client.Update(context.TODO(), &user); err != nil {
+						return reconcile.Result{}, err
+					}
+				}
 				
 				conn := Connection{
 					remoteAddr: config.Remoteaddr,
@@ -501,27 +556,26 @@ func (r *ServerCreateReconcile) Reconcile (request reconcile.Request) (reconcile
 					newUser:    user.Info.ID,
 				}
 
-			if !containsString(user.Stat.Servers, config.Remoteaddr) {
-				err = AddUser(conn, cm_log)
-				if err != nil {
-					cm_log.Error(err, err.Error())
-					// TODO no reconcile immediately, but not update status
+				if !containsString(user.Stat.Servers, config.Remoteaddr) {
+					err = AddUser(conn, cm_log)
+					if err != nil {
+						cm_log.Error(err, err.Error())
+						// TODO no reconcile immediately, but not update status
 					
-					//return reconcile.Result{RequeueAfter: time.Second * 20}, nil
+						return reconcile.Result{RequeueAfter: time.Second * 30}, nil
+					} else {
+						// sets observed state of the user
+						user.Stat.Servers = append(user.Stat.Servers, config.Remoteaddr)
+						if err = r.client.Update(context.TODO(), &user); err != nil {
+							return reconcile.Result{}, err
+						}
+						cm_log.Info(fmt.Sprintf("User %s added to %s",user.Info.ID, config.Remoteaddr))
+						break
+			    	}
 				} else {
-					// sets observed state of the user
-					user.Stat.Servers = append(user.Stat.Servers, config.Remoteaddr)
-					if err = r.client.Update(context.TODO(), &user); err != nil {
-						return reconcile.Result{}, err
-					}
-			    }
-			} else {
-				cm_log.Info(fmt.Sprintf("User %s already present in %s",user.Info.ID, config.Remoteaddr))
-				break
-			}
-				
-			cm_log.Info(fmt.Sprintf("User %s added to %s",user.Info.ID, config.Remoteaddr))
-			break
+					cm_log.Info(fmt.Sprintf("User %s already present in %s",user.Info.ID, config.Remoteaddr))
+					break
+				}
 			}
 		}
 	}
@@ -565,16 +619,16 @@ func (r *ServerDeleteReconcile) Reconcile (request reconcile.Request) (reconcile
 	for _, user := range users.Items {
 		// iterate over roles of one object
 		for _, role := range user.Info.Roles {
-
-			if containsString(user.Spec.Servers, config.Remoteaddr) {
-				user.Spec.Servers = removeString(user.Spec.Servers, config.Remoteaddr)
-				if err = r.client.Update(context.TODO(), &user); err != nil {
-					return reconcile.Result{}, err
-				}
-			}
-			
 			// iterate over ConfigMap roles
 			if containsString(config.Roles, role) {
+
+				if containsString(user.Spec.Servers, config.Remoteaddr) {
+					user.Spec.Servers = removeString(user.Spec.Servers, config.Remoteaddr)
+					if err = r.client.Update(context.TODO(), &user); err != nil {
+						return reconcile.Result{}, err
+					}
+				}
+
 				conn := Connection{
 					remoteAddr: config.Remoteaddr,
 					remoteUser: config.Remoteuser,
@@ -589,21 +643,20 @@ func (r *ServerDeleteReconcile) Reconcile (request reconcile.Request) (reconcile
 						dm_log.Error(err, err.Error())
 						
 						// TODO not reconcile immediately
-						//return reconcile.Result{RequeueAfter: time.Second * 20}, nil
+						return reconcile.Result{RequeueAfter: time.Second * 30}, nil
 					} else {
 						user.Stat.Servers = removeString(user.Stat.Servers, config.Remoteaddr)
 						if err = r.client.Update(context.TODO(), &user); err != nil {
 							return reconcile.Result{}, err
 						}
+						dm_log.Info(fmt.Sprintf("User %s deleted from %s",user.Info.ID, config.Remoteaddr))
+						break
 					}
 
 				} else {
 					dm_log.Info(fmt.Sprintf("User %s already deleted from %s",user.Info.ID, config.Remoteaddr))
 					break
 				}
-
-				dm_log.Info(fmt.Sprintf("User %s deleted from %s",user.Info.ID, config.Remoteaddr))
-				break
 			}
 		}
 	}
@@ -652,8 +705,38 @@ func (r *CreateReconcileStudentAPI) Reconcile(request reconcile.Request) (reconc
 		}
 	}
 
-	cmaps := &v1.ConfigMapList{}
+	pods := &v1.PodList{}
 	opts := []client.ListOption{
+		client.MatchingLabels(map[string] string {"app": "openvpn", "release":"oldfashioned-ocelot"}),
+	}
+	err = r.client.List(context.TODO(), pods, opts...)
+	if err != nil {
+		return reconcile.Result{}, err
+	}
+
+	var pod_name string
+	pod_name = pods.Items[0].Name
+
+	svc := &v1.ServiceList{}
+	opts = []client.ListOption{
+		client.MatchingLabels(map[string] string {"app": "openvpn", "release":"rude-hyena"}),
+	}
+	err = r.client.List(context.TODO(), svc, opts...)
+	if err != nil {
+		return reconcile.Result{}, err
+	}
+
+	var service_ip string
+
+	service_ip = svc.Items[0].Status.LoadBalancer.Ingress[0].IP
+
+	err = GenerateVPNCert(instance.Info.ID, pod_name, service_ip)
+	if err != nil {
+		c_log.Error(err,err.Error())
+	}
+
+	cmaps := &v1.ConfigMapList{}
+	opts = []client.ListOption{
 		client.InNamespace(instance.Namespace),
 		client.MatchingLabels(map[string] string {"use": "StudentAPI"}),
 	}
@@ -676,17 +759,17 @@ func (r *CreateReconcileStudentAPI) Reconcile(request reconcile.Request) (reconc
 		for _, role := range instance.Info.Roles {
 			// if user role match with at least one of the server
 			// authorized roles then AddUser()
-
-			// sets desired state of the object
-			if !containsString(instance.Spec.Servers, config.Remoteaddr) {
-				instance.Spec.Servers = append(instance.Spec.Servers, config.Remoteaddr)
-				if err = r.client.Update(context.TODO(), instance); err != nil {
-					return reconcile.Result{}, err
-				}
-			}
 			
 			// iterate over ConfigMap roles
 			if containsString(config.Roles, role) {
+				// sets desired state of the object
+				if !containsString(instance.Spec.Servers, config.Remoteaddr) {
+					instance.Spec.Servers = append(instance.Spec.Servers, config.Remoteaddr)
+					if err = r.client.Update(context.TODO(), instance); err != nil {
+						return reconcile.Result{}, err
+					}
+				}
+
 				conn := Connection{
 					remoteAddr: config.Remoteaddr,
 					remoteUser: config.Remoteuser,
@@ -695,29 +778,33 @@ func (r *CreateReconcileStudentAPI) Reconcile(request reconcile.Request) (reconc
 					newUser:    instance.Info.ID,
 				}
 
-			if !containsString(instance.Stat.Servers, config.Remoteaddr) {
-				err = AddUser(conn, c_log)
-				if err != nil {
-					c_log.Error(err, err.Error())
-					// TODO no reconcile immediately, but not update status
+				if !containsString(instance.Stat.Servers, config.Remoteaddr) {
+					err = AddUser(conn, c_log)
+					if err != nil {
+						c_log.Error(err, err.Error())
+						// TODO no reconcile immediately, but not update status
 					
-					//return reconcile.Result{RequeueAfter: time.Second * 20}, nil
+						return reconcile.Result{RequeueAfter: time.Second * 30}, nil
+					} else {
+						// sets observed state of the user
+						instance.Stat.Servers = append(instance.Stat.Servers, config.Remoteaddr)
+						if err = r.client.Update(context.TODO(), instance); err != nil {
+							return reconcile.Result{}, err
+						}
+						c_log.Info(fmt.Sprintf("User %s added to %s", instance.Info.ID, config.Remoteaddr))
+						break
+			    	}
 				} else {
-					// sets observed state of the user
-					instance.Stat.Servers = append(instance.Stat.Servers, config.Remoteaddr)
-					if err = r.client.Update(context.TODO(), instance); err != nil {
-						return reconcile.Result{}, err
-					}
-			    }
-			} else {
-				c_log.Info(fmt.Sprintf("User %s already present in %s", instance.Info.ID, config.Remoteaddr))
-				break
-			}
-				
-			c_log.Info(fmt.Sprintf("User %s added to %s", instance.Info.ID, config.Remoteaddr))
-			break
+					c_log.Info(fmt.Sprintf("User %s already present in %s", instance.Info.ID, config.Remoteaddr))
+					break
+				}
 			}
 		}
+	}
+
+	err = sendEmail(instance.Info.Email)
+	if err != nil {
+		c_log.Error(err,err.Error())
 	}
 
 	reqLogger := c_log.WithValues("User ID", instance.Info.ID)
@@ -761,17 +848,17 @@ func (r *DeleteReconcileStudentAPI) Reconcile(request reconcile.Request) (reconc
 		for _, role := range instance.Info.Roles {
 			// if user role match with at least one of the server
 			// authorized roles then delete user from that machine
-
-			// sets desired state of the object
-			if containsString(instance.Spec.Servers, config.Remoteaddr) {
-				instance.Spec.Servers = removeString(instance.Spec.Servers, config.Remoteaddr)
-				if err = r.client.Update(context.TODO(), instance); err != nil {
-					return reconcile.Result{}, err
-				}
-			}
 			
 			// iterate over ConfigMap roles
 			if containsString(config.Roles, role) {
+				// sets desired state of the object
+				if containsString(instance.Spec.Servers, config.Remoteaddr) {
+					instance.Spec.Servers = removeString(instance.Spec.Servers, config.Remoteaddr)
+					if err = r.client.Update(context.TODO(), instance); err != nil {
+						return reconcile.Result{}, err
+					}
+				}
+
 				conn := Connection{
 					remoteAddr: config.Remoteaddr,
 					remoteUser: config.Remoteuser,
@@ -780,29 +867,41 @@ func (r *DeleteReconcileStudentAPI) Reconcile(request reconcile.Request) (reconc
 					newUser:    instance.Info.ID,
 				}
 
-			if containsString(instance.Stat.Servers, config.Remoteaddr) {
-				err = DeleteUser(conn, d_log)
-				if err != nil {
-					d_log.Error(err, err.Error())
-					// TODO no reconcile immediately, but not update status
+				if containsString(instance.Stat.Servers, config.Remoteaddr) {
+					err = DeleteUser(conn, d_log)
+					if err != nil {
+						d_log.Error(err, err.Error())
+						// TODO no reconcile immediately, but not update status
 					
-					//return reconcile.Result{RequeueAfter: time.Second * 20}, nil
+						 return reconcile.Result{RequeueAfter: time.Second * 30}, nil
+					} else {
+						// sets observed state of the user
+						instance.Stat.Servers = removeString(instance.Stat.Servers, config.Remoteaddr)
+						if err = r.client.Update(context.TODO(), instance); err != nil {
+							return reconcile.Result{}, err
+						}
+						d_log.Info(fmt.Sprintf("User %s deleted from %s", instance.Info.ID, config.Remoteaddr))
+						break
+			    	}
 				} else {
-					// sets observed state of the user
-					instance.Stat.Servers = removeString(instance.Stat.Servers, config.Remoteaddr)
-					if err = r.client.Update(context.TODO(), instance); err != nil {
-						return reconcile.Result{}, err
-					}
-			    }
-			} else {
-				d_log.Info(fmt.Sprintf("User %s already deleted from %s", instance.Info.ID, config.Remoteaddr))
-				break
-			}
-				
-			d_log.Info(fmt.Sprintf("User %s deleted from %s", instance.Info.ID, config.Remoteaddr))
-			break
+					d_log.Info(fmt.Sprintf("User %s already deleted from %s", instance.Info.ID, config.Remoteaddr))
+					break
+				}	
 			}
 		}
+	}
+
+	name := t.NamespacedName{Namespace: "dcota-ns1", Name: instance.Info.ID + ".ovpn"}
+
+	secret := &v1.Secret{}
+	err = r.client.Get(context.TODO(), name, secret)
+	if err != nil {
+		return reconcile.Result{}, err
+	}
+
+	err = r.client.Delete(context.TODO(), secret)
+	if err != nil {
+		return reconcile.Result{}, err
 	}
 
 	// look for matching finalizers
@@ -820,10 +919,3 @@ func (r *DeleteReconcileStudentAPI) Reconcile(request reconcile.Request) (reconc
 
 	return reconcile.Result{}, nil
 }
-
-// TODO gestione concorrenza
-// TODO quanti utenti connessi
-// TODO handle all possible errors
-// TODO refactor with class
-// TODO add name and surname when registering
-// TODO use Spec and Stat to see the running users
