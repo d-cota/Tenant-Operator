@@ -32,11 +32,17 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/source"
 )
 
+/* --- GLOBAL VARIABLES AND CONSTANTS --- */
+
+// keyValuePair contains key and value
+// for Server ConfigMap labels
 type keyValuePair struct {
 	key   string
 	value string
 }
 
+// Connection is a struct to
+// pass user infos to the functions
 type Connection struct {
 	remoteAddr string
 	remotePort string
@@ -45,7 +51,8 @@ type Connection struct {
 	newUser    string
 }
 
-// TODO reuse Connection inside
+// Config is used to parse the yaml
+// inside the ConfigMap
 type Config struct {
 	Remoteuser string `yaml:"remote-user"`
 	Remoteport string `yaml:"remote-port"`
@@ -53,8 +60,9 @@ type Config struct {
 	Roles 	   []string `yaml:"roles"`
 }
 
-// TODO add other vars
+
 var (
+	// a logger for each controller
 	c_log = logf.Log.WithName("controller_create_studentapi")
 	d_log = logf.Log.WithName("controller_delete_studentapi")
 	cm_log = logf.Log.WithName("controller_create_server")
@@ -62,7 +70,6 @@ var (
 	kvp keyValuePair
 )
 
-// TODO add const such as kvp
 const (
 	PRIVATE_KEY  string = "/etc/secret-volume/ssh-privatekey"
 	BASTION      string = "bastion"
@@ -70,9 +77,13 @@ const (
 	HOME         string = "/home/"
 	S_FINALIZER  string = "finalizers/student"
 	C_FINALIZER  string = "finalizers/cmap"
+	FROM 		 string = "coursecloudcomputing@gmail.com"
 )
 
-// Helper functions to check and remove string from a slice of strings.
+/* --- GENERIC FUNCTIONS --- */
+
+// containsString check string from a slice of strings.
+// returns: true if s is present, false otherwise
 func containsString(slice []string, s string) bool {
 	for _, item := range slice {
 		if item == s {
@@ -82,6 +93,8 @@ func containsString(slice []string, s string) bool {
 	return false
 }
 
+// removeString remove string from a slice of strings.
+// returns: modified slice
 func removeString(slice []string, s string) (result []string) {
 	for _, item := range slice {
 		if item == s {
@@ -92,6 +105,8 @@ func removeString(slice []string, s string) (result []string) {
 	return
 }
 
+// EstablishConnection prepare the fields to ssh jump through the bastion
+// returns: (Session, nil) if success; (nil, err) if an error occurs
 func EstablishConnection(remoteAddr string, remotePort string, remoteUser string) (*ssh.Session, error) {
 	key, err := ioutil.ReadFile(PRIVATE_KEY) // path to bastion private key authentication
 	if err != nil {
@@ -103,6 +118,8 @@ func EstablishConnection(remoteAddr string, remotePort string, remoteUser string
 		return nil, err
 	}
 
+	// this is similar to a ssh config file, here it is specified bastion addr
+	// and the authentication method
 	config := &ssh.ClientConfig{
 		User: BASTION,
 		Auth: []ssh.AuthMethod{
@@ -111,6 +128,7 @@ func EstablishConnection(remoteAddr string, remotePort string, remoteUser string
 		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
 	}
 
+	// starts dialing with the bastion
 	bClient, err := ssh.Dial("tcp", BASTION_ADDR, config)
 	if err != nil {
 		return nil, err
@@ -122,6 +140,7 @@ func EstablishConnection(remoteAddr string, remotePort string, remoteUser string
 		return nil, err
 	}
 
+	// here it is specified the user name and his authentication method (public key)
 	config = &ssh.ClientConfig{
 		User: remoteUser,
 		Auth: []ssh.AuthMethod{
@@ -130,6 +149,7 @@ func EstablishConnection(remoteAddr string, remotePort string, remoteUser string
 		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
 	}
 
+	// start a new connection to the client
 	ncc, chans, reqs, err := ssh.NewClientConn(conn, rAddr, config)
 	if err != nil {
 		return nil, err
@@ -140,22 +160,27 @@ func EstablishConnection(remoteAddr string, remotePort string, remoteUser string
 	return sClient.NewSession()
 }
 
-// this function connects to the remote machine and creates a new user named with his studentID
+// AddUser connects to the remote machine and creates a new user named with his studentID
+// returns: nil if success, err if error
 func AddUser(c Connection, log logr.Logger) (err error) {
 
 	session, err := EstablishConnection(c.remoteAddr, c.remotePort, c.remoteUser)
 	if err != nil {
 		return
 	}
+	// close the session when AddUser returns
 	defer session.Close()
 
-	keyPath := "/tmp/" + c.newUser + ".pub" // where to write user key in pod
+	// path where to write user key in the container
+	keyPath := "/tmp/" + c.newUser + ".pub" 
 
-	file, err := os.Create(keyPath) //filename
+	// create the key file in the container
+	file, err := os.Create(keyPath) 
 	if err != nil {
 		return
 	}
 
+	// fill the file with the user public key
 	_, err = io.Copy(file, strings.NewReader(c.publicKey))
 	if err != nil {
 		return 
@@ -163,6 +188,7 @@ func AddUser(c Connection, log logr.Logger) (err error) {
 
 	file.Close()
 
+	// it is needed to close and reopen the file otherwise it doesn't work
 	file, err = os.Open(keyPath)
 	if err != nil {
 		return
@@ -176,13 +202,14 @@ func AddUser(c Connection, log logr.Logger) (err error) {
 	}
 	defer session.Close()
 
+	// synchronization
 	wG := sync.WaitGroup{}
 	wG.Add(1)
 
 	go func() {
 		stdin, _ := session.StdinPipe()
 		defer stdin.Close()
-		fmt.Fprintf(stdin, "C0664 %d %s\n", stat.Size(), c.newUser+".pub") // file name in the remote host, s263084.pub
+		fmt.Fprintf(stdin, "C0664 %d %s\n", stat.Size(), c.newUser + ".pub") // file name in the remote host, s263084.pub
 		io.Copy(stdin, file)
 		fmt.Fprint(stdin, "\x00")
 		wG.Done()
@@ -190,18 +217,23 @@ func AddUser(c Connection, log logr.Logger) (err error) {
 
 	var b bytes.Buffer
 	session.Stdout = &b
-	keyPath = HOME + c.remoteUser                                             // where to copy the publicKey in the remote server
-	cmd := "/usr/bin/scp -t " + keyPath + ";sudo ./addstudent.sh " + c.newUser // scp copies pKey in remote server, addstudent.sh copies it in new user
+	// path where to copy the publicKey in the remote server
+	keyPath = HOME + c.remoteUser    
+	// scp copies the pub key in remote server, addstudent.sh copies it in new user                                        
+	cmd := "/usr/bin/scp -t " + keyPath + ";sudo ./addstudent.sh " + c.newUser 
 	if err = session.Run(cmd); err != nil {
 		return
 	}
 
+	// verbosity level V(1) only used in debugging
 	log.V(1).Info(fmt.Sprintf(b.String()))
 	wG.Wait()
 
 	return nil
 }
 
+// DeleteUser delete an user from a remote machines via ssh
+// returns: nil if success, err if error
 func DeleteUser(c Connection, log logr.Logger) (err error) {
 
 	session, err := EstablishConnection(c.remoteAddr, c.remotePort, c.remoteUser)
@@ -216,6 +248,7 @@ func DeleteUser(c Connection, log logr.Logger) (err error) {
 		return 
 	}
 
+	// starts the remote shell
 	err = session.Shell()
 	if err != nil {
 		return
@@ -224,6 +257,8 @@ func DeleteUser(c Connection, log logr.Logger) (err error) {
 	var b bytes.Buffer
 	session.Stdout = &b
 
+	// kick off the user if logged, erase the user account from the machine
+	// delete his pub key from the server
 	commands := []string { 
 		"pkill -KILL -u " + c.newUser,
 		"sudo deluser --remove-home " + c.newUser,
@@ -231,6 +266,7 @@ func DeleteUser(c Connection, log logr.Logger) (err error) {
 		"exit",
 	}
 
+	// launch the commands in the remote shell
 	for _, cmd := range commands {
 		_, err = fmt.Fprintf(stdin, "%s\n", cmd)
 		if err != nil {
@@ -250,33 +286,47 @@ func DeleteUser(c Connection, log logr.Logger) (err error) {
 
 }
 
-func sendEmail(to string) (err error){
+// sendEmail sends an email with the list of user authorized machines
+// returns: nil if success, err if error
+func sendEmail(to string, machines []string) (err error){
 	// Choose auth method and set it up
-	auth := smtp.PlainAuth("", "coursecloudcomputing@gmail.com", "verysecretpass", "smtp.gmail.com")
+	auth := smtp.PlainAuth("", FROM, "verysecretpass", "smtp.gmail.com")
 
 	// Here we do it all: connect to our server, set up a message and send it
-	msg := "From: coursecloudcomputing@gmail.com\n" +
+	msg := "From:" + FROM +
 			"To:" + to + "\n" +
 			"Subject: Welcome to the Cloud Computing Lab\r\n" +
 			"\r\n" +
-			"Hi, you're just been added to some machines. Enjoy!\r\n"
-	err = smtp.SendMail("smtp.gmail.com:587", auth,"coursecloudcomputing@gmail.com", []string{to} , []byte(msg))
+			"Hi, you're just been added to the Cloud Computing Lab.\r\n" + 
+			"An account has been created for you in the following machines:\n" + 
+			strings.Join(machines, "\n") +
+			"\nThe public key that you subscribed has already been added to the server, from now on you can connect from remote to the machine via ssh." +
+			"\nBest regards,\n\r Cloud Computing team"
+	err = smtp.SendMail("smtp.gmail.com:587", auth, FROM, []string{to}, []byte(msg))
 	if err != nil {
 		return 
 	}
+
 	return nil
 }
 
+// GenerateVPNCert launch a sh file in a pod where a new .ovpn certificate is generated, 
+// then creates the corresponding secret
+// returns: nil if success, err if error
 func GenerateVPNCert(user string, pod_name string, service_ip string) (err error) {
+	// launch the sh file in the container
 	cmd := exec.Command("./root/kubectl", "exec", "-it", pod_name, "-c", "openvpn", "/etc/openvpn/setup/newClientCert.sh", user, service_ip)
 	_, err = cmd.Output()
 	if err != nil {
 		return
 	}
 
+	// redirect the cat output in the os stdout, then save the certificate in a file in the operator container
 	cmd = exec.Command("./root/kubectl", "exec", "-it", pod_name, "-c", "openvpn", "cat", "/etc/openvpn/certs/pki/" + user + ".ovpn")
 	var stderr bytes.Buffer
+	var stdout bytes.Buffer
 	cmd.Stderr = &stderr
+	cmd.Stdout = &stdout
 	err = cmd.Run()
 	if err != nil {
 		c_log.Info(fmt.Sprintf("%s: %s",err, stderr.String()))
@@ -294,6 +344,7 @@ func GenerateVPNCert(user string, pod_name string, service_ip string) (err error
 
 	file.Close()
 
+	// create the corresponding secret
 	cmd = exec.Command("./root/kubectl", "create", "secret", "generic", user + ".ovpn", "--from-file=/root/" + user + ".ovpn")
 	err = cmd.Run()
 	if err != nil {
@@ -303,7 +354,8 @@ func GenerateVPNCert(user string, pod_name string, service_ip string) (err error
 	return nil
 }
 
-// Add creates two new StudentAPI Controllers and adds them to the Manager. The Manager will set fields on the Controller
+/* --- CONTROLLER --- */
+// Add creates four new StudentAPI Controllers and adds them to the Manager. The Manager will set fields on the Controller
 // and Start it when the Manager is Started.
 func Add(mgr manager.Manager) error {
 	return add(mgr, newReconcilerCreate(mgr), newReconcilerDelete(mgr), newReconcilerCreateServer(mgr), newReconcilerDeleteServer(mgr))
@@ -330,6 +382,7 @@ func newReconcilerDeleteServer(mgr manager.Manager) reconcile.Reconciler {
 }
 
 // add adds new Controllers to mgr
+// 4 controllers: Create a Student, Delete a Student, Create a Configmap Server, Delete a Configmap Server
 func add(mgr manager.Manager, rCreate reconcile.Reconciler, rDelete reconcile.Reconciler, rCreateServer reconcile.Reconciler, rDeleteServer reconcile.Reconciler) error {
 	// Create a new controller for Create event
 	c_create, err := controller.New("create-controller", mgr, controller.Options{Reconciler: rCreate})
@@ -337,10 +390,12 @@ func add(mgr manager.Manager, rCreate reconcile.Reconciler, rDelete reconcile.Re
 		return err
 	}
 
+	// watch StudentAPI object
 	src_StudentAPI := &source.Kind{Type: &netgroupv1.StudentAPI{}}
 
 	h := &handler.EnqueueRequestForObject{}
 
+	// which events has to watch the controller
 	pred_create := predicate.Funcs{
 		CreateFunc: func(e event.CreateEvent) bool {
 			return true
@@ -374,6 +429,7 @@ func add(mgr manager.Manager, rCreate reconcile.Reconciler, rDelete reconcile.Re
 
 		},
 		UpdateFunc: func(e event.UpdateEvent) bool {
+			// since a finalizer is present, reacts when the DeletionTimestamp is not zero
 			return !e.MetaNew.GetDeletionTimestamp().IsZero()
 		},
 	}
@@ -389,6 +445,7 @@ func add(mgr manager.Manager, rCreate reconcile.Reconciler, rDelete reconcile.Re
 		return err
 	}
 
+	// watch the ConfigMap
 	src_serv := &source.Kind{Type: &v1.ConfigMap{}}
 
 	kvp := keyValuePair{ 
@@ -396,6 +453,7 @@ func add(mgr manager.Manager, rCreate reconcile.Reconciler, rDelete reconcile.Re
 		value: "StudentAPI",
 	}
 
+	// events to watch, but reacts only to the ConfigMap labeled "use"="StudentAPI"
 	pred_serv_c := predicate.Funcs{
 		CreateFunc: func(e event.CreateEvent) bool {
 			labels := e.Meta.GetLabels()
@@ -409,6 +467,7 @@ func add(mgr manager.Manager, rCreate reconcile.Reconciler, rDelete reconcile.Re
 		UpdateFunc: func(e event.UpdateEvent) bool {
 			labels := e.MetaOld.GetLabels()
 			if val, ok := labels[kvp.key]; ok {
+				// react only when the finalizer is not updated
 				if val == kvp.value && (len(e.MetaNew.GetFinalizers()) == len(e.MetaOld.GetFinalizers()) && e.MetaNew.GetDeletionTimestamp().IsZero()) {
 				return true
 			}
@@ -492,6 +551,10 @@ type ServerDeleteReconcile struct {
 	scheme *runtime.Scheme
 }
 
+/* --- RECONCILERS --- */
+
+// Reconcile reconciles a Server ConfigMap when it is created. It looks for all the student
+// with the matching Role field and it adds them to the machine
 func (r *ServerCreateReconcile) Reconcile (request reconcile.Request) (reconcile.Result, error) {
 	// Fetch the StudentAPI instance
 	instance := &v1.ConfigMap{}
@@ -507,6 +570,7 @@ func (r *ServerCreateReconcile) Reconcile (request reconcile.Request) (reconcile
 		return reconcile.Result{}, err
 	}
 
+	// add ConfigMap finalizer
 	if !containsString(instance.Finalizers, C_FINALIZER) {
 		instance.Finalizers = append(instance.Finalizers, C_FINALIZER)
 		if err = r.client.Update(context.TODO(), instance); err != nil {
@@ -518,10 +582,12 @@ func (r *ServerCreateReconcile) Reconcile (request reconcile.Request) (reconcile
 
 	var config Config
 
+	// read the yaml in the ConfigMap
 	if err = yaml.Unmarshal([]byte(yml), &config); err != nil {
 		cm_log.Error(err,err.Error())
 	}	
 
+	// list all the student CRs in the namespace
 	users := &netgroupv1.StudentAPIList{}
 	opts := []client.ListOption{
 		client.InNamespace(instance.Namespace),
@@ -556,11 +622,12 @@ func (r *ServerCreateReconcile) Reconcile (request reconcile.Request) (reconcile
 					newUser:    user.Info.ID,
 				}
 
+				// if the user is not present in the machine (Spec is not empty, Stat it is), then add him 
 				if !containsString(user.Stat.Servers, config.Remoteaddr) {
 					err = AddUser(conn, cm_log)
 					if err != nil {
+						// if any error occurs, reconcile after 30 sec
 						cm_log.Error(err, err.Error())
-						// TODO no reconcile immediately, but not update status
 					
 						return reconcile.Result{RequeueAfter: time.Second * 30}, nil
 					} else {
@@ -585,6 +652,7 @@ func (r *ServerCreateReconcile) Reconcile (request reconcile.Request) (reconcile
 	return reconcile.Result{}, nil
 }
 
+// Reconcile reconcile a ConfigMap Server at the deletion. It deletes all accounts in the machine
 func (r *ServerDeleteReconcile) Reconcile (request reconcile.Request) (reconcile.Result, error) {
 	// Fetch the StudentAPI instance
 	instance := &v1.ConfigMap{}
@@ -623,6 +691,7 @@ func (r *ServerDeleteReconcile) Reconcile (request reconcile.Request) (reconcile
 			if containsString(config.Roles, role) {
 
 				if containsString(user.Spec.Servers, config.Remoteaddr) {
+					// delete Spec server address entry in the user CR
 					user.Spec.Servers = removeString(user.Spec.Servers, config.Remoteaddr)
 					if err = r.client.Update(context.TODO(), &user); err != nil {
 						return reconcile.Result{}, err
@@ -642,9 +711,9 @@ func (r *ServerDeleteReconcile) Reconcile (request reconcile.Request) (reconcile
 					if err != nil {
 						dm_log.Error(err, err.Error())
 						
-						// TODO not reconcile immediately
 						return reconcile.Result{RequeueAfter: time.Second * 30}, nil
 					} else {
+						// delete Stat server address entry in the user CR
 						user.Stat.Servers = removeString(user.Stat.Servers, config.Remoteaddr)
 						if err = r.client.Update(context.TODO(), &user); err != nil {
 							return reconcile.Result{}, err
@@ -679,6 +748,8 @@ func (r *ServerDeleteReconcile) Reconcile (request reconcile.Request) (reconcile
 // and what is in the StudentAPI.Info
 // The Controller will requeue the Request to be processed again if the returned error is non-nil or
 // Result.Requeue is true, otherwise upon completion it will remove the work from the queue.
+// Reconcile reconciles a StudentAPI object when it is created. It adds the student to
+// all the authorized machines watching at Role field.
 func (r *CreateReconcileStudentAPI) Reconcile(request reconcile.Request) (reconcile.Result, error) {
 	// Fetch the StudentAPI instance
 	instance := &netgroupv1.StudentAPI{}
@@ -705,6 +776,7 @@ func (r *CreateReconcileStudentAPI) Reconcile(request reconcile.Request) (reconc
 		}
 	}
 
+	// look for vpn pod
 	pods := &v1.PodList{}
 	opts := []client.ListOption{
 		client.MatchingLabels(map[string] string {"app": "openvpn", "release":"oldfashioned-ocelot"}),
@@ -717,6 +789,7 @@ func (r *CreateReconcileStudentAPI) Reconcile(request reconcile.Request) (reconc
 	var pod_name string
 	pod_name = pods.Items[0].Name
 
+	// look for vpn service
 	svc := &v1.ServiceList{}
 	opts = []client.ListOption{
 		client.MatchingLabels(map[string] string {"app": "openvpn", "release":"rude-hyena"}),
@@ -727,14 +800,9 @@ func (r *CreateReconcileStudentAPI) Reconcile(request reconcile.Request) (reconc
 	}
 
 	var service_ip string
-
 	service_ip = svc.Items[0].Status.LoadBalancer.Ingress[0].IP
 
-	err = GenerateVPNCert(instance.Info.ID, pod_name, service_ip)
-	if err != nil {
-		c_log.Error(err,err.Error())
-	}
-
+	// list all Server ConfigMap
 	cmaps := &v1.ConfigMapList{}
 	opts = []client.ListOption{
 		client.InNamespace(instance.Namespace),
@@ -745,6 +813,8 @@ func (r *CreateReconcileStudentAPI) Reconcile(request reconcile.Request) (reconc
 		return reconcile.Result{}, err
 	}
 
+	// list of user authorized servers 
+	var machines []string
 	// iterate over all cmaps
 	for _, cmap := range cmaps.Items {
 		yml := cmap.Data["config"]
@@ -782,7 +852,6 @@ func (r *CreateReconcileStudentAPI) Reconcile(request reconcile.Request) (reconc
 					err = AddUser(conn, c_log)
 					if err != nil {
 						c_log.Error(err, err.Error())
-						// TODO no reconcile immediately, but not update status
 					
 						return reconcile.Result{RequeueAfter: time.Second * 30}, nil
 					} else {
@@ -791,6 +860,7 @@ func (r *CreateReconcileStudentAPI) Reconcile(request reconcile.Request) (reconc
 						if err = r.client.Update(context.TODO(), instance); err != nil {
 							return reconcile.Result{}, err
 						}
+						machines = append(machines, config.Remoteaddr)
 						c_log.Info(fmt.Sprintf("User %s added to %s", instance.Info.ID, config.Remoteaddr))
 						break
 			    	}
@@ -802,7 +872,14 @@ func (r *CreateReconcileStudentAPI) Reconcile(request reconcile.Request) (reconc
 		}
 	}
 
-	err = sendEmail(instance.Info.Email)
+	// generate the user VPN certificate
+	err = GenerateVPNCert(instance.Info.ID, pod_name, service_ip)
+	if err != nil {
+		c_log.Error(err,err.Error())
+	}
+
+	// send an email with instructions
+	err = sendEmail(instance.Info.Email, machines)
 	if err != nil {
 		c_log.Error(err,err.Error())
 	}
@@ -813,6 +890,8 @@ func (r *CreateReconcileStudentAPI) Reconcile(request reconcile.Request) (reconc
 	return reconcile.Result{}, nil
 }
 
+// Reconcile reconcile a StudentAPI object when it is deleted. It handles the account deletion
+// from servers and revocates the ovpn certificate 
 func (r *DeleteReconcileStudentAPI) Reconcile(request reconcile.Request) (reconcile.Result, error) {
 	// Fetch the StudentAPI instance
 	instance := &netgroupv1.StudentAPI{}
@@ -824,6 +903,7 @@ func (r *DeleteReconcileStudentAPI) Reconcile(request reconcile.Request) (reconc
 		return reconcile.Result{}, client.IgnoreNotFound(err)
 	}
 
+	// look for Server ConfigMap
 	cmaps := &v1.ConfigMapList{}
 	opts := []client.ListOption{
 		client.InNamespace(instance.Namespace),
@@ -871,7 +951,6 @@ func (r *DeleteReconcileStudentAPI) Reconcile(request reconcile.Request) (reconc
 					err = DeleteUser(conn, d_log)
 					if err != nil {
 						d_log.Error(err, err.Error())
-						// TODO no reconcile immediately, but not update status
 					
 						 return reconcile.Result{RequeueAfter: time.Second * 30}, nil
 					} else {
@@ -891,17 +970,18 @@ func (r *DeleteReconcileStudentAPI) Reconcile(request reconcile.Request) (reconc
 		}
 	}
 
+	// name of the secret containing the certificate to be deleted
 	name := t.NamespacedName{Namespace: "dcota-ns1", Name: instance.Info.ID + ".ovpn"}
-
 	secret := &v1.Secret{}
 	err = r.client.Get(context.TODO(), name, secret)
 	if err != nil {
-		return reconcile.Result{}, err
-	}
-
-	err = r.client.Delete(context.TODO(), secret)
-	if err != nil {
-		return reconcile.Result{}, err
+		d_log.Error(err, err.Error())
+	} else {
+		// delete the ovpn certificate
+		err = r.client.Delete(context.TODO(), secret)
+		if err != nil {
+			d_log.Error(err, err.Error())
+		}
 	}
 
 	// look for matching finalizers
@@ -913,7 +993,6 @@ func (r *DeleteReconcileStudentAPI) Reconcile(request reconcile.Request) (reconc
 		}
 	}
 		
-
 	reqLogger := d_log.WithValues("Student ID", instance.Info.ID)
 	reqLogger.Info("Correctly deleted user")
 
