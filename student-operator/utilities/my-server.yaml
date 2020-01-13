@@ -7,8 +7,7 @@ items:
       remote-addr: 10.244.2.36
       remote-port: 22
       roles:
-        - phD
-        - student
+        - professor
   kind: ConfigMap
   metadata:
     labels:
