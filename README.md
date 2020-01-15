@@ -25,7 +25,7 @@ Project scaffolding is explained [here](https://github.com/operator-framework/op
 # Usage
 ## Create and deploy the operator
 ```sh
-Before launching these commands move in the student-operator folder.
+# Before launching these commands move in the student-operator folder.
 # Setup Service Account
 $ kubectl create -f deploy/service_account.yaml
 # Setup RBAC
