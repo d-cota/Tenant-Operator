@@ -333,7 +333,7 @@ func GenerateVPNCert(user string, pod_name string, service_ip string) (err error
 		return
 	}
 
-	file, err := os.Create("/root/" + user + ".ovpn") 
+	file, err := os.Create("/root/" + user + "-ovpn") 
 	if err != nil {
 		return
 	}
@@ -345,9 +345,11 @@ func GenerateVPNCert(user string, pod_name string, service_ip string) (err error
 	file.Close()
 
 	// create the corresponding secret
-	cmd = exec.Command("./root/kubectl", "create", "secret", "generic", user + ".ovpn", "--from-file=/root/" + user + ".ovpn")
+	cmd = exec.Command("./root/kubectl", "create", "secret", "generic", user + "-ovpn", "--from-file=/root/" + user + "-ovpn")
+	cmd.Stderr = &stderr
 	err = cmd.Run()
 	if err != nil {
+		c_log.Info(fmt.Sprintf("%s: %s",err, stderr.String()))
 		return
 	}
 
@@ -971,7 +973,7 @@ func (r *DeleteReconcileStudentAPI) Reconcile(request reconcile.Request) (reconc
 	}
 
 	// name of the secret containing the certificate to be deleted
-	name := t.NamespacedName{Namespace: "dcota-ns1", Name: instance.Info.ID + ".ovpn"}
+	name := t.NamespacedName{Namespace: "dcota-ns1", Name: instance.Info.ID + "-ovpn"}
 	secret := &v1.Secret{}
 	err = r.client.Get(context.TODO(), name, secret)
 	if err != nil {
