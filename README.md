@@ -64,7 +64,7 @@ $ docker push dcota1/student-operator
 # Now replace the image field in the deploy/operator.yaml
 # with your new image version
 ```
-# Modify the CRD
+## Modify the CRD
 
 In order to modify the Student CRD you have to modify the code in [pkg/apis/netgroup/v1/studentapi_types.go](pkg/apis/netgroup/v1/studentapi_types.go). This will build a new Schema for the Kubernetes API to access the newly created.
 Each time you change that file you have to run the following commands:
