@@ -1,0 +1,14 @@
+apiVersion: netgroup.com/v1
+kind: StudentAPI
+metadata:
+  name: davidecota
+info:
+  # Add fields here
+  id: s263084
+  name: davide
+  surname: cota
+  email: s263084@studenti.polito.it
+  group: group0
+  roles:
+    - student
+  publicKey: ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQCfOqyR7dUgkgRDwy5Mh0MTCqiCrcEJUWHNJmd9OzWfRCKR3f3BmM+zC+rb7dFvon/AbTZcuPz1OJxyX0/mwJiJ7PSEM+FlW9T8knFkCJs14zbRkVTpkUwrIMHhN/Ev6z/4aJk5YrZwxuJ0KaKQejWH00bZUAkF6mZA+1Wa53s8H640Y3k8B5SnWXRsR3LZV8KnoFq+mrDtSdMC9M2ozjQAbx5UOCiBBQ7tt9SMmtYLHZghKO3/ikhvWsblO+dn6xm+Dm9U+0NZMRsRPnSrm+FmN+lwgZR6d80f+PnoEseURaOfhTVHmJ7kTFAJxu9a1rC8EE0IOevK+IQxV0Rd/+lP davide@davpc
