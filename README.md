@@ -37,7 +37,7 @@ kubectl create secret generic <gmail-secret> --from-literal=<gmail-key-secret>='
 ```
 
 ### Customize deployment
-Edit the operator deployment manifest at [student-operator/deploy/operator.yaml]. Below  are shown the lines that you need to modify in the yaml.
+Edit the operator deployment manifest at [tenant-operator/deploy/operator.yaml](tenant-operator/deploy/operator.yaml). Below  are shown the lines that you need to modify in the yaml.
 
 ```yaml
 [...]
@@ -64,7 +64,7 @@ Edit the operator deployment manifest at [student-operator/deploy/operator.yaml]
 ### Create and deploy the operator
 Open a Linux shell in the root folder of this project and type the following commands:
 ```sh
-# Before launching these commands move in the student-operator folder.
+# Before launching these commands move in the tenant-operator folder.
 # Setup Service Account
 $ kubectl create -f deploy/service_account.yaml
 # Setup RBAC
@@ -75,7 +75,7 @@ $ kubectl create -f deploy/crds/netgroup.com_tenants_crd.yaml
 # Deploy the operator
 $ kubectl create -f deploy/operator.yaml
 
-# Create a Student CR
+# Create a Tenant CR
 $ kubectl create -f examples/sampleuser_cr.yaml
 # Create a Host ConfigMap
 $ kubectl create -f examples/samplehost.yaml
@@ -113,7 +113,7 @@ Developers must follow the same steps presented in the 'Common User' section. A 
 ## Usage
 
 ### Modify the operator
-The go-lang code for the general purpose functions is at [student-operator/pkg/controller/studentapi/studentapi_controller.go](student-operator/pkg/controller/studentapi/studentapi_controller.go). Each time you modify the code you have to re-build the operator and push the corresponding docker image. Then, you have to modify the operator deployment [student-operator/deploy/operator.yaml](https://github.com/netgroup-polito/StudentOperator/blob/master/student-operator/deploy/operator.yaml) changing the container image field with the newly built image.
+The go-lang code for the general purpose functions is at [tenant-operator/pkg/controller/tenant/tenant_controller.go](tenant-operator/pkg/controller/tenant/tenant_controller.go) for what concerns the Tenants handling, while the controllers monitoring the hosts are at [tenant-operator/pkg/controller/host/host_controller.go](tenant-operator/pkg/controller/host/host_controller.go). Each time you modify the code you have to re-build the operator and push the corresponding docker image. Then, you have to modify the operator deployment [tenant-operator/deploy/operator.yaml](tenant-operator/deploy/operator.yaml) changing the container image field with the newly built image.
 ```sh 
 # Change <user> with your DockerHub username, a version can be added with :vx.y
 # replace x and y with your version number
@@ -131,7 +131,7 @@ Now replace the image field in the deploy/operator.yaml with your new image vers
 ```
 ### Modify the CRD
 
-In order to modify the Tenant CRD you have to modify the code in [pkg/apis/netgroup/v1/studentapi_types.go](pkg/apis/netgroup/v1/studentapi_types.go). This will build a new Schema for the Kubernetes API to access the newly created.
+In order to modify the Tenant CRD you have to modify the code in [pkg/apis/netgroup/v1/tenant_types.go](pkg/apis/netgroup/v1/tenant_types.go). This will build a new Schema for the Kubernetes API to access the newly created.
 Each time you change that file you have to run the following commands to regenerate the CRD yaml file and to rebuild the API schema:
 ```sh
 $ operator-sdk generate k8s
