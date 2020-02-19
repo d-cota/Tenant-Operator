@@ -1,0 +1,57 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tenant-operator
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      name: tenant-operator
+  template:
+    metadata:
+      labels:
+        name: tenant-operator
+    spec:
+      serviceAccountName: student-operator
+      volumes:
+      - name: secret-volume
+        secret:
+	# Replace this with the Kubernetes key name
+          secretName: <ssh-key-secret>
+      containers:
+        - name: tenant-operator
+          # Replace this with the built image name
+          image: docker.io/dcota1/tenant-operator:latest
+          volumeMounts:
+          - name: secret-volume
+            readOnly: true
+            mountPath: "etc/secret-volume"
+          command:
+          - tenant-operator
+          imagePullPolicy: Always
+          env:
+            - name: WATCH_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: OPERATOR_NAME
+              value: "tenant-operator"
+            - name: BASTION
+	# Replace this with the bastion username
+              value: <bastionusername>
+            - name: BASTION_ADDR
+	# Replace this with the bastion address and port
+              value: <address>:<port>
+            - name: MAIL_FROM
+	# Replace this with your gmail account
+              value: <mail>@gmail.com
+            - name: MAIL_PASS
+	# Replace this with your gmail password Kubernetes secret
+              valueFrom:
+                secretKeyRef:
+                  name: <gmail-secret>
+                  key: <gmail-key-secret>
