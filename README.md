@@ -42,8 +42,8 @@ Edit the operator deployment manifest at [tenant-operator/deploy/operator.yaml](
 ```yaml
 [...]
         secret:
-	# Replace this with the Kubernetes key name
-          secretName: <ssh-key-secret>
+	# Replace this with the Kubernetes secret key name
+          secretName: <bastion-ssh-key-secret>
 [...]
 	# Replace this with the bastion username
               value: <bastionusername>
@@ -89,10 +89,10 @@ $ kubectl describe tenants sampleuser
 
 ### Delete the resources
 ```sh
-# Delete all created CRs
+# Delete the CR
 $ kubectl delete -f examples/sampleuser_cr.yaml
 
-# Delete all created hosts ConfigMaps
+# Delete the host ConfigMap
 $ kubectl delete -f examples/samplehost.yaml
 
 # Delete the deployment
@@ -115,7 +115,7 @@ Developers must follow the same steps presented in the 'Common User' section. A 
 ### Modify the operator
 The go-lang code for the general purpose functions is at [tenant-operator/pkg/controller/tenant/tenant_controller.go](tenant-operator/pkg/controller/tenant/tenant_controller.go) for what concerns the Tenants handling, while the controllers monitoring the hosts are at [tenant-operator/pkg/controller/host/host_controller.go](tenant-operator/pkg/controller/host/host_controller.go). Each time you modify the code you have to re-build the operator and push the corresponding docker image. Then, you have to modify the operator deployment [tenant-operator/deploy/operator.yaml](tenant-operator/deploy/operator.yaml) changing the container image field with the newly built image.
 ```sh 
-# Change <user> with your DockerHub username, a version can be added with :vx.y
+# Change <user> with your DockerHub username, a version can be added with :v<x.y>
 # replace x and y with your version number
 $ operator-sdk build <user>/tenant-operator
 
