@@ -51,10 +51,12 @@ const (
 )
 
 var (
-	BASTION      = os.Getenv("BASTION")
-	BASTION_ADDR = os.Getenv("BASTION_ADDR")
-	MAIL_FROM    = os.Getenv("MAIL_FROM")
-	MAIL_PASS    = os.Getenv("MAIL_PASS")
+	BASTION         = os.Getenv("BASTION")
+	BASTION_ADDR    = os.Getenv("BASTION_ADDR")
+	MAIL_FROM       = os.Getenv("MAIL_FROM")
+	MAIL_PASS       = os.Getenv("MAIL_PASS")
+	POD_RELEASE     = os.Getenv("POD_RELEASE")
+	SERVICE_RELEASE = os.Getenv("SERVICE_RELEASE")
 )
 
 /* --- GENERIC FUNCTIONS --- */
