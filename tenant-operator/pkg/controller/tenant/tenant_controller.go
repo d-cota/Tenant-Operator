@@ -8,9 +8,11 @@ import (
 	"github.com/goccy/go-yaml"
 	netgroupv1 "github.com/netgroup/tenant-operator/pkg/apis/netgroup/v1"
 	utils "github.com/netgroup/tenant-operator/utilities"
+	"github.com/operator-framework/operator-sdk/pkg/k8sutil"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/event"
@@ -24,8 +26,10 @@ import (
 
 var (
 	// a logger for each controller
-	c_log = logf.Log.WithName("controller_create_tenant")
-	d_log = logf.Log.WithName("controller_delete_tenant")
+	c_log    = logf.Log.WithName("controller_create_tenant")
+	d_log    = logf.Log.WithName("controller_delete_tenant")
+	machines []string
+	config   utils.Config
 )
 
 /* --- CONTROLLER --- */
@@ -158,34 +162,6 @@ func (r *CreateReconcileTenant) Reconcile(request reconcile.Request) (reconcile.
 		}
 	}
 
-	/* // cause operator crash //
-	// look for vpn pod
-	pods := &v1.PodList{}
-	opts := []client.ListOption{
-		client.MatchingLabels(map[string]string{"app": "openvpn", "release": "oldfashioned-ocelot"}),
-	}
-	err = r.client.List(context.TODO(), pods, opts...)
-	if err != nil {
-		return reconcile.Result{}, err
-	}
-
-	var pod_name string
-	pod_name = pods.Items[0].Name
-
-	// look for vpn service
-	svc := &v1.ServiceList{}
-	opts = []client.ListOption{
-		client.MatchingLabels(map[string]string{"app": "openvpn", "release": "rude-hyena"}),
-	}
-	err = r.client.List(context.TODO(), svc, opts...)
-	if err != nil {
-		return reconcile.Result{}, err
-	}
-
-	var service_ip string
-	service_ip = svc.Items[0].Status.LoadBalancer.Ingress[0].IP
-	*/
-
 	// list all Host ConfigMap
 	cmaps := &v1.ConfigMapList{}
 	opts := []client.ListOption{
@@ -197,13 +173,9 @@ func (r *CreateReconcileTenant) Reconcile(request reconcile.Request) (reconcile.
 		return reconcile.Result{}, err
 	}
 
-	// list of user authorized hosts
-	var machines []string
 	// iterate over all cmaps
 	for _, cmap := range cmaps.Items {
 		yml := cmap.Data["config"]
-
-		var config utils.Config
 
 		if err = yaml.Unmarshal([]byte(yml), &config); err != nil {
 			c_log.Error(err, err.Error())
@@ -256,13 +228,33 @@ func (r *CreateReconcileTenant) Reconcile(request reconcile.Request) (reconcile.
 		}
 	}
 
-	/*
+	// look for vpn pod
+	pods := &v1.PodList{}
+	opts = []client.ListOption{
+		client.MatchingLabels(map[string]string{"app": "openvpn", "release": utils.POD_RELEASE}),
+	}
+	err = r.client.List(context.TODO(), pods, opts...)
+	if err != nil {
+		return reconcile.Result{}, err
+	}
+
+	// look for vpn service
+	svc := &v1.ServiceList{}
+	opts = []client.ListOption{
+		client.MatchingLabels(map[string]string{"app": "openvpn", "release": utils.SERVICE_RELEASE}),
+	}
+	err = r.client.List(context.TODO(), svc, opts...)
+	if err != nil {
+		return reconcile.Result{}, err
+	}
+
+	if len(pods.Items) > 0 && len(svc.Items) > 0 {
 		// generate the user VPN certificate
-		err = utils.GenerateVPNCert(instance.Info.ID, pod_name, service_ip, c_log)
+		err = utils.GenerateVPNCert(instance.Info.ID, pods.Items[0].Name, svc.Items[0].Status.LoadBalancer.Ingress[0].IP, c_log)
 		if err != nil {
 			c_log.Error(err, err.Error())
 		}
-	*/
+	}
 
 	// send an email with instructions
 	err = utils.SendEmail(instance.Info.Email, machines)
@@ -303,8 +295,6 @@ func (r *DeleteReconcileTenant) Reconcile(request reconcile.Request) (reconcile.
 	// iterate over all cmaps
 	for _, cmap := range cmaps.Items {
 		yml := cmap.Data["config"]
-
-		var config utils.Config
 
 		if err = yaml.Unmarshal([]byte(yml), &config); err != nil {
 			d_log.Error(err, err.Error())
@@ -356,21 +346,20 @@ func (r *DeleteReconcileTenant) Reconcile(request reconcile.Request) (reconcile.
 		}
 	}
 
-	/*
-		// name of the secret containing the certificate to be deleted
-		name := t.NamespacedName{Namespace: "dcota-ns1", Name: instance.Info.ID + "-ovpn"}
-		secret := &v1.Secret{}
-		err = r.client.Get(context.TODO(), name, secret)
+	namespace, _ := k8sutil.GetWatchNamespace()
+	// name of the secret containing the certificate to be deleted
+	name := types.NamespacedName{Namespace: namespace, Name: instance.Info.ID + "-ovpn"}
+	secret := &v1.Secret{}
+	err = r.client.Get(context.TODO(), name, secret)
+	if err != nil {
+		d_log.Error(err, err.Error())
+	} else {
+		// delete the ovpn certificate
+		err = r.client.Delete(context.TODO(), secret)
 		if err != nil {
 			d_log.Error(err, err.Error())
-		} else {
-			// delete the ovpn certificate
-			err = r.client.Delete(context.TODO(), secret)
-			if err != nil {
-				d_log.Error(err, err.Error())
-			}
 		}
-	*/
+	}
 
 	// look for matching finalizers
 	if utils.ContainsString(instance.Finalizers, utils.S_FINALIZER) {
