@@ -83,26 +83,27 @@ Edit the operator deployment manifest at [tenant-operator/deploy/operator.yaml](
 
 ```yaml
 [...]
+      volumes:
+      - name: secret-volume
         secret:
-	# Replace this with the Kubernetes secret key name
-          secretName: <bastion-ssh-key-secret>
+          # Replace this with the Kubernetes key name
+          secretName: <ssh-key-secret>
 [...]
-	    - name: BASTION
-	      # Replace this with the bastion username
+            - name: BASTION
+              # Replace this with the bastion username
               value: <bastionusername>
             - name: BASTION_ADDR
-	      # Replace this with the bastion address and port
+              # Replace this with the bastion address and port
               value: <address>:<port>
             - name: MAIL_FROM
-	      # Replace this with your gmail account
+              # Replace this with your gmail account
               value: <mail>@gmail.com
             - name: MAIL_PASS
-	      # Replace this with your gmail password Kubernetes secret
+              # Replace this with your gmail password Kubernetes secret
               valueFrom:
                 secretKeyRef:
                   name: <gmail-secret>
                   key: <gmail-key-secret>
-
 ```
 ### Create and deploy the operator
 Open a Linux shell in the root folder of this project and type the following commands:
@@ -185,6 +186,17 @@ $ operator-sdk generate openapis
 # Open VPN
 *TenantOperator* provides also a functionality related to **VPN access**: it will generate and delete for each tenant an **Open VPN** token in the form of a *Kubernetes secret*. You can retrieve it by typing:
 ```sh
-kubectl get secret <tenant-id>-ovpn -o wide
+$ kubectl get secret <tenant-id>-ovpn -o wide
 ```
-> Note: kubectl must be installed in the operator container
+> Note: *kubectl* must be installed in the operator container.
+
+In order to exploit this feature you have to put in the operator manifest the current release of both running OpenVPN pod and service.
+
+```yaml
+            - name: POD_RELEASE
+              # Replace this with the ovpn pod release
+              value: <ovpn-pod-release>
+            - name: SERVICE_RELEASE
+              # Replace this with the ovpn service release
+              value: <ovpn-service-release>
+```
